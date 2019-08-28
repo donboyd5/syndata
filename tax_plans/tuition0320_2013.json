@@ -1,0 +1,17 @@
+// Eliminate the tuition and fees deduction
+// Don Boyd
+//
+// This is intended to be roughly comparable to Dan Feenberg's
+// revenue score item called _03230.
+//
+// It is implemented by creating a "haircut" with the parameter ALD_Tuition_hc
+//
+// Tax-Calculator documentation (https://pslmodels.github.io/Tax-Calculator/uguide.html#pol) 
+// Here are the amounts for ALD_Tuition_hc from the documentation:
+// 2013: 0
+// Setting the haircut to 1 (100%) gives us:
+// "ALD_Tuition_hc": {"2013": 1}
+//
+{
+    "ALD_Tuition_hc": {"2013": 1}
+}

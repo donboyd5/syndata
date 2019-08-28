@@ -1,0 +1,736 @@
+Input Variables
+This section contains documentation of input variables in a format that is easy to search and print. The input variables are ordered alphabetically by name. There are no subsections, just a long list of input variables that Tax-Calculator is programmed to use in its calculations. The Availability information indicates which input data files contain the variable.
+
+Input Variable Name: DSI
+Description: 1 if claimed as dependent on another return; otherwise 0
+Datatype: int
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 6a
+
+Input Variable Name: EIC
+Description: number of EIC qualifying children (range: 0 to 3)
+Datatype: int
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 Sch EIC
+
+Input Variable Name: FLPDYR
+Description: Calendar year for which taxes are calculated
+Datatype: int
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040
+
+Input Variable Name: MARS
+Required Input Variable
+Description: Filing (marital) status: line number of the checked box [1=single, 2=joint, 3=separate, 4=household-head, 5=widow(er)]
+Datatype: int
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 lines 1-5
+
+Input Variable Name: MIDR
+Description: 1 if separately filing spouse itemizes; otherwise 0
+Datatype: int
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 1040 line 39b
+
+Input Variable Name: RECID
+Required Input Variable
+Description: Unique numeric identifier for filing unit; appears as RECID variable in tc CLI minimal output
+Datatype: int
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: private info
+
+Input Variable Name: XTOT
+Description: Total number of exemptions for filing unit
+Datatype: int
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 6d
+
+Input Variable Name: a_lineno
+Description: CPS line number for the person record of the head of the tax filing unit (not used in tax-calculation logic)
+Datatype: int
+Availability: taxdata_cps
+IRS Form Location:
+2013-2016: sample construction info
+
+Input Variable Name: age_head
+Description: Age in years of taxpayer (i.e. primary adult)
+Datatype: int
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: imputed from CPS data
+
+Input Variable Name: age_spouse
+Description: Age in years of spouse (i.e. secondary adult if present)
+Datatype: int
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: imputed from CPS data
+
+Input Variable Name: agi_bin
+Description: Historical AGI category used in data extrapolation
+Datatype: int
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: not used in tax calculations
+
+Input Variable Name: blind_head
+Description: 1 if taxpayer is blind; otherwise 0
+Datatype: int
+Availability: taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 39a
+
+Input Variable Name: blind_spouse
+Description: 1 if spouse is blind; otherwise 0
+Datatype: int
+Availability: taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 39a
+
+Input Variable Name: cmbtp
+Description: Estimate of income on (AMT) Form 6251 but not in AGI
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 6251 and 1040
+
+Input Variable Name: data_source
+Description: 1 if unit is created primarily from IRS-SOI PUF data; 0 if created primarily from CPS data (not used in tax-calculation logic)
+Datatype: int
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: sample construction info
+
+Input Variable Name: e00200
+Description: Wages, salaries, and tips for filing unit net of pension contributions
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 7
+
+Input Variable Name: e00200p
+Description: Wages, salaries, and tips for taxpayer net of pension contributions (pencon_p)
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 7 component
+
+Input Variable Name: e00200s
+Description: Wages, salaries, and tips for spouse net of pension contributions (pencon_s)
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 7 component
+
+Input Variable Name: e00300
+Description: Taxable interest income
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 8a
+
+Input Variable Name: e00400
+Description: Tax-exempt interest income
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 8b
+
+Input Variable Name: e00600
+Description: Ordinary dividends included in AGI
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 9a
+
+Input Variable Name: e00650
+Description: Qualified dividends included in ordinary dividends
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 9b
+
+Input Variable Name: e00700
+Description: Taxable refunds of state and local income taxes
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 1040 line 10
+
+Input Variable Name: e00800
+Description: Alimony received
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 11
+
+Input Variable Name: e00900
+Description: Sch C business net profit/loss for filing unit
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 12
+
+Input Variable Name: e00900p
+Description: Sch C business net profit/loss for taxpayer
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 12 component
+
+Input Variable Name: e00900s
+Description: Sch C business net profit/loss for spouse
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 12 component
+
+Input Variable Name: e01100
+Description: Capital gain distributions not reported on Sch D
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 13
+
+Input Variable Name: e01200
+Description: Other net gain/loss from Form 4797
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 1040 line 14
+
+Input Variable Name: e01400
+Description: Taxable IRA distributions
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 15b
+
+Input Variable Name: e01500
+Description: Total pensions and annuities
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 16a
+
+Input Variable Name: e01700
+Description: Taxable pensions and annuities
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 16b
+
+Input Variable Name: e02000
+Description: Sch E total rental, royalty, partnership, S-corporation, etc, income/loss (includes e26270 and e27200)
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 1040 line 17
+
+Input Variable Name: e02100
+Description: Farm net income/loss for filing unit from Sch F
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 18
+
+Input Variable Name: e02100p
+Description: Farm net income/loss for taxpayer
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 18 component
+
+Input Variable Name: e02100s
+Description: Farm net income/loss for spouse
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 18 component
+
+Input Variable Name: e02300
+Description: Unemployment insurance benefits
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 19
+
+Input Variable Name: e02400
+Description: Total social security (OASDI) benefits
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 20a
+
+Input Variable Name: e03150
+Description: Total deductible IRA contributions
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 32
+
+Input Variable Name: e03210
+Description: Student loan interest
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 33
+
+Input Variable Name: e03220
+Description: Educator expenses
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 1040 line 23
+
+Input Variable Name: e03230
+Description: Tuition and fees from Form 8917
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 1040 line 34
+
+Input Variable Name: e03240
+Description: Domestic production activities from Form 8903
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 35
+
+Input Variable Name: e03270
+Description: Self-employed health insurance deduction
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 29
+
+Input Variable Name: e03290
+Description: Health savings account deduction from Form 8889
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 1040 line 25
+
+Input Variable Name: e03300
+Description: Contributions to SEP, SIMPLE and qualified plans
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 line 28
+
+Input Variable Name: e03400
+Description: Penalty on early withdrawal of savings
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 1040 line 30
+
+Input Variable Name: e03500
+Description: Alimony paid
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 1040 line 31a
+
+Input Variable Name: e07240
+Description: Retirement savings contributions credit from Form 8880
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2013: 1040 line 50
+2014-2016: 1040 line 51
+
+Input Variable Name: e07260
+Description: Residential energy credit from Form 5695
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2013: 1040 line 52
+2014-2016: 1040 line 53
+
+Input Variable Name: e07300
+Description: Foreign tax credit from Form 1116
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2013: 1040 line 47
+2014-2016: 1040 line 48
+
+Input Variable Name: e07400
+Description: General business credit from Form 3800
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2013: 1040 line 53a
+2014-2016: 1040 line 54a
+
+Input Variable Name: e07600
+Description: Prior year minimum tax credit from Form 8801
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2013: 1040 line 53b
+2014-2016: 1040 line 54b
+
+Input Variable Name: e09700
+Description: Recapture of Investment Credit
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2015: 4255 line 15
+2016-2016: 4255 line 20
+
+Input Variable Name: e09800
+Description: Unreported payroll taxes from Form 4137 or 8919
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2013: 1040 line 57
+2014-2016: 1040 line 58
+
+Input Variable Name: e09900
+Description: Penalty tax on qualified retirement plans
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2013: 1040 line 58
+2014-2016: 1040 line 59
+
+Input Variable Name: e11200
+Description: Excess payroll (FICA/RRTA) tax withheld
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2013: 1040 line 69
+2014-2016: 1040 line 71
+
+Input Variable Name: e17500
+Description: Itemizable medical and dental expenses. WARNING: this variable is zero below the floor in PUF data.
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 Sch A line 1
+
+Input Variable Name: e18400
+Description: Itemizable state and local income/sales taxes
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 Sch A line 5
+
+Input Variable Name: e18500
+Description: Itemizable real-estate taxes paid
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 Sch A line 6
+
+Input Variable Name: e19200
+Description: Itemizable interest paid
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 Sch A line 15
+
+Input Variable Name: e19800
+Description: Itemizable charitable giving: cash/check contributions. WARNING: this variable is already capped in PUF data.
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 Sch A line 16
+
+Input Variable Name: e20100
+Description: Itemizable charitable giving: other than cash/check contributions. WARNING: this variable is already capped in PUF data.
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 Sch A line 17
+
+Input Variable Name: e20400
+Description: Itemizable miscellaneous deductions. WARNING: this variable is zero below the floor in PUF data.
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 1040 Sch A line 24
+
+Input Variable Name: e24515
+Description: Sch D: Un-Recaptured Section 1250 Gain
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 1040 Sch D line 19
+
+Input Variable Name: e24518
+Description: Sch D: 28% Rate Gain or Loss
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 1040 Sch D line 18
+
+Input Variable Name: e26270
+Description: Sch E: Combined partnership and S-corporation net income/loss (includes k1bx14p and k1bx14s amounts and is included in e02000)
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 1040 Sch E line 32
+
+Input Variable Name: e27200
+Description: Sch E: Farm rent net income or loss (included in e02000)
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 1040 Sch E line 40
+
+Input Variable Name: e32800
+Description: Child/dependent-care expenses for qualifying persons from Form 2441
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 2441 line 3
+
+Input Variable Name: e58990
+Description: Investment income elected amount from Form 4952
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 4952 line 4g
+
+Input Variable Name: e62900
+Description: Alternative Minimum Tax foreign tax credit from Form 6251
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 6251 line 32
+
+Input Variable Name: e87521
+Description: Total tentative AmOppCredit amount for all students
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 8863 Part I line 1 and 8863 Part III line 30
+
+Input Variable Name: e87530
+Description: Adjusted qualified lifetime learning expenses for all students
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 8863 Part I line 10 and 8863 Part III line 31
+
+Input Variable Name: elderly_dependents
+Description: number of dependents age 65+ in filing unit excluding taxpayer and spouse
+Datatype: int
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: imputed from CPS data; not used in tax law
+
+Input Variable Name: f2441
+Description: number of child/dependent-care qualifying persons
+Datatype: int
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: 2441 line 2b
+
+Input Variable Name: f6251
+Description: 1 if Form 6251 (AMT) attached to return; otherwise 0
+Datatype: int
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 6251
+
+Input Variable Name: ffpos
+Description: CPS family identifier within household (not used in tax-calculation logic)
+Datatype: int
+Availability: taxdata_cps
+IRS Form Location:
+2013-2016: sample construction info
+
+Input Variable Name: fips
+Description: FIPS state code (not used in tax-calculation logic)
+Datatype: int
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: sample construction info
+
+Input Variable Name: g20500
+Description: Itemizable gross (before 10% AGI disregard) casualty or theft loss
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 1040 Sch A line 20 before disregard subtracted
+
+Input Variable Name: h_seq
+Description: CPS household sequence number (not used in tax-calculation logic)
+Datatype: int
+Availability: taxdata_cps
+IRS Form Location:
+2013-2016: sample construction info
+
+Input Variable Name: housing_ben
+Description: Imputed housing benefits
+Datatype: float
+Availability: taxdata_cps
+IRS Form Location:
+2014-20??: imputed using the C-TAM model
+
+Input Variable Name: k1bx14p
+Description: Partner self-employment earnings/loss for taxpayer (included in e26270 total)
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 1065 (Schedule K-1) box 14
+
+Input Variable Name: k1bx14s
+Description: Partner self-employment earnings/loss for spouse (included in e26270 total)
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 1065 (Schedule K-1) box 14
+
+Input Variable Name: mcaid_ben
+Description: Imputed Medicaid benefits expressed as the actuarial value of Medicaid health insurance
+Datatype: float
+Availability: taxdata_cps
+IRS Form Location:
+2014-20??: imputed using the C-TAM model
+
+Input Variable Name: mcare_ben
+Description: Imputed Medicare benefits expressed as the actuarial value of Medicare health insurance
+Datatype: float
+Availability: taxdata_cps
+IRS Form Location:
+2014-20??: imputed using the C-TAM model
+
+Input Variable Name: n1820
+Description: Number of people age 18-20 years old in the filing unit
+Datatype: int
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: imputed from CPS data
+
+Input Variable Name: n21
+Description: Number of people 21 years old or older in the filing unit
+Datatype: int
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: imputed from CPS data
+
+Input Variable Name: n24
+Description: Number of children who are Child-Tax-Credit eligible, one condition for which is being under age 17
+Datatype: int
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: imputed from CPS data
+
+Input Variable Name: nu05
+Description: Number of dependents under 5 years old
+Datatype: int
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: imputed from CPS data
+
+Input Variable Name: nu13
+Description: Number of dependents under 13 years old
+Datatype: int
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: imputed from CPS data
+
+Input Variable Name: nu18
+Description: Number of people under 18 years old in the filing unit
+Datatype: int
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: imputed from CPS data
+
+Input Variable Name: other_ben
+Description: Non-imputed benefits
+Datatype: float
+Availability: taxdata_cps
+IRS Form Location:
+2014-20??: determined using government benefit program data
+
+Input Variable Name: p08000
+Description: Other tax credits (but not including Sch R credit)
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2013: 1040 line 53
+2014-2016: 1040 line 54
+
+Input Variable Name: p22250
+Description: Sch D: Net short-term capital gains/losses
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 1040 Sch D line 7
+
+Input Variable Name: p23250
+Description: Sch D: Net long-term capital gains/losses
+Datatype: float
+Availability: taxdata_puf
+IRS Form Location:
+2013-2016: 1040 Sch D line 15
+
+Input Variable Name: pencon_p
+Description: Contributions to defined-contribution pension plans for taxpayer
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: Imputed using IRS tabulations of Form W-2 sample
+
+Input Variable Name: pencon_s
+Description: Contributions to defined-contribution pension plans for spouse
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: Imputed using IRS tabulations of Form W-2 sample
+
+Input Variable Name: s006
+Description: Filing unit sampling weight; appears as WEIGHT variable in tc CLI minimal output
+Datatype: float
+Availability: taxdata_puf, taxdata_cps
+IRS Form Location:
+2013-2016: not used in filing unit tax calculations
+
+Input Variable Name: snap_ben
+Description: Imputed SNAP benefits
+Datatype: float
+Availability: taxdata_cps
+IRS Form Location:
+2014-20??: imputed using the C-TAM model
+
+Input Variable Name: ssi_ben
+Description: Imputed SSI benefits
+Datatype: float
+Availability: taxdata_cps
+IRS Form Location:
+2014-20??: imputed using the C-TAM model
+
+Input Variable Name: tanf_ben
+Description: Imputed TANF benefits
+Datatype: float
+Availability: taxdata_cps
+IRS Form Location:
+2014-20??: imputed using the C-TAM model
+
+Input Variable Name: vet_ben
+Description: Imputed Veteran's benefits
+Datatype: float
+Availability: taxdata_cps
+IRS Form Location:
+2014-20??: imputed using the C-TAM model
+
+Input Variable Name: wic_ben
+Description: Imputed WIC benefits
+Datatype: float
+Availability: taxdata_cps
+IRS Form Location:
+2014-20??: imputed using the C-TAM model
+

@@ -1,0 +1,10 @@
+// Raise top income tax rate to 45%
+// Raise top capital gains tax rate to 30%
+// Increase maximum taxable earnings for social security
+{
+    "policy": {
+        "II_rt7": {"2013": 0.45},
+        "CG_rt3": {"2013": 0.30},
+        "SS_Earnings_c": {"2013": 250000}
+    }
+}

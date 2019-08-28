@@ -1,0 +1,13 @@
+// See https://pslmodels.github.io/Tax-Calculator/uguide.html#pol for policy parameters
+// Reduce income tax rates across the board
+{
+    "policy": {
+        "II_rt1": {"2013": 0.05},
+        "II_rt2": {"2013": 0.10},
+        "II_rt3": {"2013": 0.20},
+        "II_rt4": {"2013": 0.25},
+        "II_rt5": {"2013": 0.28},
+        "II_rt6": {"2013": 0.30},
+        "II_rt7": {"2013": 0.35}
+    }
+}

@@ -1,0 +1,211 @@
+vname,value,vdesc
+e00100,8292.99984550258,Adjusted Gross Income (deficit)  (AGI)  (+/-)
+e00200,6044.77069293594,Salaries and wages
+e04800,5665.34125248656,Taxable income
+e06000,5269.713568070621,Income subject to tax
+e06200,2240.44745820102,Marginal tax base
+e62100,2171.86598130516,Alternative minimum taxable income
+p04470,2005.4125689816,Total deductions (standard or itemized)
+e60000,1898.0600067513,"Form 1040 Taxable Income for AMT (Form 6251, Line 1)"
+s008,1844.1487636103607,Sample count
+e10605,1249.9442610631002,Total tax payments (SOI)
+e05200,1135.61829188786,Computed regular tax
+e05800,1099.319134698,Income tax before credits
+e10300,1072.74949360954,Total tax liability (SOI)
+e04600,1068.8806119383,Exemption amount
+e05100,1068.7897687500601,Tax on taxable income
+e08800,1027.91113554084,Income Tax after Credits (SOI)
+e06500,1027.90783411684,Total income tax
+e06300,1016.07751470296,Tax generated (tax rate tables)
+e10700,969.8859646888001,Income tax withheld
+e01500,905.1973854453399,Total pensions and annuities received
+e01700,579.19554735986,Pensions and annuities included in AGI
+e24560,524.3823997117,Non-Schedule D tax
+e02400,495.3272370873,Gross Social Security benefits
+e02000,466.92376740478005,Schedule E net income or loss (+/-)
+e59560,460.62569858774,Earned income for earned income credit (EIC)
+e24516,434.25881520896,Capital gain less investment expense
+e26270,407.29899011686,Combined partnership and S corporation net income/loss (+/-)
+e19200,380.18336293438,Total interest paid deduction
+p23250,356.900110801,Long-term gains less losses
+e62740,330.69541201768,Alternative minimum capital gain amount
+e01000,327.3544942084,Net capital gain or loss (+/-)
+e01500_minus_e01700,326.00183808547996,NA
+e62720,322.15263045177994,Alternative minimum Schedule D less investment interest amount
+p25350,308.61833849452,Total rents and royalties received
+FLPDYR,291.91476089223,NA
+e26190,285.37065564953997,Total non-passive income
+p25380,283.82996021753996,Rent/Royalty Expenses
+e00900,279.56989523171995,Business or profession (Schedule C) net profit/loss (+/-)
+e18400,274.87661346342003,State and local taxes
+e11900,-267.51374193978,Balance due (overpayment) (+/-)
+e30400,254.3715508136,Total self-employment income subject to SS Tax
+e10900,221.86417202648002,Estimated tax payments
+e01400,219.07496000416,Taxable IRA distribution
+p61850,216.96742921684,Total adjustments and preferences (+/-)
+e02500,203.91193436506,Social Security benefits in AGI
+e25980,200.90733897864,Total non-passive income
+e00600,182.28291203310002,Dividends included in AGI
+e18500,173.12725341170002,Real estate tax deductions
+e19700,168.64462056256,"Contributions deduction, total"
+p65300,152.97906710722,Total passive net income
+e19800,134.92981094767998,Cash contributions
+e17500,130.68034769989998,Medical and dental expenses subject to reduction by AGI limit
+e00650,130.57277134278,Qualified Dividends
+e20400,120.6849939797,"Miscellaneous deductions subject to AGI limitation, total"
+e22320,113.55120051902,Long term gain/loss from other forms on Schedule D
+e00300,113.2106686276,Interest received
+e25850,98.43377847619999,Rent/royalty net income
+e02300,92.57740249369999,Unemployment compensation in AGI
+e11603,90.99515543438001,Total Refundable Credits Refundable Parts
+p65400,89.79999631328,Total passive losses
+e20800,85.4700906272,Net limited miscellaneous deductions
+e20550,76.58359488576,Unreimbursed employee business expense
+e25960,72.6738832891,Total non-passive loss
+e25550,72.25747870294,Total Depreciation and Depletion of all Property
+e07150,71.42407344092,Total tax credit (SOI)
+e00400,70.27525545708001,Tax-exempt interest income
+e25940,67.41003445524,Total passive income
+e25860,62.2408965515,Rent/royalty net loss
+e68000,61.5246004502,Total losses allowed from all passive activities
+e26180,59.264209267800005,Total non-passive loss
+e11100,56.25905305352,Amount paid with Form 4868 (Request for Extension)
+p60100,56.015231017139996,Net operating loss tax preference
+e59720,55.26965259618,EIC refundable portion
+e00600_minus_e00650,51.71014069032,NA
+e25820,51.59283852986,Deductible rental loss
+e24598,50.45292521042,Schedule D 15 percent tax amount
+e30500,47.7265964145,"Self-employment income subject to SS Tax, secondary taxpayer"
+e12000,46.55495586304,Credit elect
+e09400,45.5761389921,Self-employment tax
+e58950,42.53430402824,Total investment Interest Expense
+p87482,42.391270474980004,American Opportunity Qualified Expenses
+e26170,38.75428225854,Total passive income
+e20100,34.58212457218,Other than cash contributions
+e09600,30.44733093342,Alternative minimum tax
+e87521,29.19790701138,American Opportunity Credit
+e11070,28.5878978081,Additional Child Tax Credit
+e07220,28.20537694514,Child Tax Credit
+e00700,26.91088801334,State income tax refunds
+e25920,25.67717394764,Total passive loss
+e03260,25.6503151928,Deduction for self-employment tax
+p25700,24.789854956939998,Rent/royalty net income or loss (+/-)
+e03270,24.67445607838,Self-employed health insurance deduction
+e26390,21.81338658396,Total income
+e03300,19.046713824900003,Payments to KEOGH accounts
+wsamp,18.63486755938,Sample code
+txrt,18.170286896599997,Tax rate code
+e32800,18.1261451835,Qualifying individuals' Expenses
+e33000,17.8155462285,Expenses limited to earned income
+e01200,-17.50211580178,Other gains (or loss)  (+/-)
+e26100,17.28468777926,S-corp. Section 179 expense deduction
+e87530,16.2188692434,Lifetime Learning Total Qualified Expenses
+p22250,-15.55094224486,Short-term gains less losses
+e07300,14.015042813280001,Foreign tax
+e62900,12.64142160932,Alternative tax foreign tax credit
+e07230,12.3890306821,Education Credits
+e22370,12.25524795472,Schedule D capital gain distributions
+e10960,11.43673563826,Refundable Education Credit
+e24515,11.31817389398,Unrecaptured Section 1250 gain
+e03150,11.11802620686,Total deductible individual retirement account (IRA) payments
+e03210,9.719330127860001,Student Loan Interest Deduction
+e02100,-9.2915109923,Schedule F net profit/loss (+/-)
+e03240,8.14470122374,Domestic Production Activities deduction
+e62730,8.02285504982,Alternative minimum Schedule D unrecaptured section 1250 gain
+e11602,8.017871487439999,Total Refundable Credits Used to Offset All Other Taxes
+e82200,7.85048947876,Carry forward of minimum tax credit
+e00800,7.6267936175,Alimony received
+e11601,7.4077286431800005,Total Refundable Credits Used to Offset Income Tax Before Credits
+e03500,7.153411412,Alimony paid
+e20600,7.05007709546,Tax preparation fee
+e59700,6.42186435708,EIC used to offset all other taxes except advance EIC
+e09900,5.81430594236,Penalty tax on IRA
+e26160,5.62305062572,Total passive loss
+s27860,5.5277723931,Tentative Current and Prior-Year Tax
+e19550,5.39536269346,Qualified Mortgage Insurance Premiums
+e27200,4.67967850472,Farm rent net income or loss (+/-)
+e26110,4.62162308724,Partnership Section 179 expense deduction
+t27800,4.533064213,Elected Farm Income
+e03230,4.16830428246,Tuition and Fees Deduction
+e24518,3.89052626172,28% Rate Gain or Loss
+e20500,3.6722097964000002,Net casualty or theft loss
+e07180,3.51648780534,Child and dependent care
+p27895,3.20379239982,Actual Prior-Year Tax
+e03290,3.1418484437600003,Health Savings Account deduction
+e26400,3.0801205722800002,Total loss
+agir1,2.8440727149900003,Adjusted Gross Income (AGI) Range
+e87550,2.4649356766999997,Lifetime Learning Credit
+e07400,2.42027315892,General business credit
+e58990,2.19432154946,Investment income (Form 4952 part 2 line 4g)
+flpdmo,1.7419438653599995,"Filing (Accounting) Period, Month"
+e01100,1.7269739525999999,Capital gain distributions reported on Form 1040
+e11200,1.58215332284,Excess FICA/RRTA
+e07260,1.53709903474,Residential Energy Credit
+e11400,1.3756871358799998,Regulated investment company credit
+e24615,1.3361761750999999,Schedule D 25 percent tax amount
+e10950,1.1457439819200002,Making Work Pay Credit (Prior Year)
+e07240,1.1178871346800001,Retirement Savings Credit
+e59680,1.10540146024,EIC used to offset income tax before credits
+e53317,1.0533098055399999,Employer Credit for Social Security Tax on Tips
+e87870,1.05259093862,Limited Making Work Pay Credit
+e53280,1.00961605314,Research and experimentation (included in general business credit)
+e03220,0.9871940431599999,Educator Expenses
+e24570,0.79813303916,Schedule D 28 percent tax amount
+e12200,0.74836976916,Predetermined estimated tax penalty
+e11550,0.69258259492,Refundable Credit Payment
+e07600,0.50180721263999994,Credit for prior year minimum tax
+e03400,0.45859442504000003,Forfeited interest penalty
+e53240,0.39821630739999997,Work Opportunity - Jobs (included in general business credit)
+e53300,0.39771449776,Low Income Housing Credit
+e15100,0.396677949,Net Disaster Loss
+e11300,0.29651009782,Credit for federal tax on special fuels and oils
+XTOT,0.28347189242,NA
+MARS,0.26946188031,NA
+fded,0.24654470126999994,Form of Deduction Code
+txst,0.23383415494999998,Tax Status
+efi,0.19094517914,Electronic Filing Indicator
+xfpt,0.13642215103000008,Primary Taxpayer Exemption
+p08000,0.12132392446,Other Credits
+prep,0.09732207088000006,Tax Preparer Indicator
+tform,0.08414810649,Form of Return
+xocah,0.08042232263000001,Exemptions for Children Living at Home
+n24,0.06942821877000001,Number of Children for Child Tax Credit
+e53410,0.0606679324,Unlimited General Business Credit (Prior Year)
+xfst,0.053518690619999996,Secondary Taxpayer Exemption
+EIC,0.03537392189,NA
+e87875,0.0309693577,Economic Recovery Payment
+e21040,0.0287727415,Itemized deduction limitation (Prior Year)
+schcf,0.027255123730000004,Schedule C or F Indicator
+p86421,0.0259670915,Bond Purchase Amount
+penratio,0.024543296734934217,NA
+schb,0.020606287749999997,Schedule B Indicator
+divratio,0.019813122486110064,NA
+e15250,0.01957186466,Real Estate Tax
+sche,0.01836632281,Schedule E Indicator
+e09700,0.017985423440000002,Recapture taxes
+f8867,0.01681649241,"Form 8867, Paid Preparer’s Earned Income Credit Checklist"
+elect,0.016062613370000003,Presidential Election Campaign Fund Boxes
+e07200,0.0159312566,Elderly or disabled
+e09800,0.01526000672,Social security tax on tip income
+e18600,0.014786864,Motor Vehicle Tax
+f8949,0.014648927109999998,"Form 8949, Sales and Other Dispositions of Capital Assets"
+n30,0.01415053084,Number of Qualified Students for American Opportunity Credit
+e15360,0.013595671799999999,Motor Vehicle Tax
+f6251,0.01017261718,"Form 6251, Alternative Minimum Tax"
+xoodep,0.00988626163,Exemptions for Other Dependents
+f2441,0.00970583824,"Form 2441, Child Care Credit Qualified Individual"
+e04250,0.0089974914,Real Estate Tax Deduction from Standard Deduction (Prior Year)
+DSI,0.00873983775,NA
+f8582,0.00646465099,"Form 8582, Passive Activity Loss Limitation"
+f8829,0.00396317971,"Form 8829, Expenses for business use of your Home"
+n25,0.0030020407599999997,Number of Qualified Students for Lifetime Learning Credit
+xopar,0.00269845276,Exemptions for Parents Living at Home or Away from Home
+f8606,0.0022053711000000003,"Form 8606, Nondeductible IRA Contributions"
+f3800,7.6129913e-4,"Form 3800, General Business credit"
+MIDR,7.1465124e-4,NA
+xocawh,5.2401375e-4,Exemptions for Children Living Away from Home
+ie,1.1955826000000001e-4,Itemized Deductions Election Indicator
+f8910,7.99353e-6,"Form 8910, Alternative Motor Vehicle Credit"
+n20,5.6712299999999996e-6,Number of Qualified Students for Hope Credit
+e15210,0,Basic Standard Deduction
+e87880,0,Government Pension or Annuity Received

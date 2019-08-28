@@ -1,0 +1,6 @@
+// Increase Max EITC Amount
+{
+    "policy": {
+        "EITC_c": {"2013": [1000, 7000, 10000, 12000]}
+    }
+}

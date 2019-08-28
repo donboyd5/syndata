@@ -1,0 +1,25 @@
+// Reduce the 2013 33% rate threshold by some dollar amount.
+// Don Boyd
+//
+// This is intended to be roughly comparable to Dan Feenberg's
+// revenue score item called _brk5, which reduced the 2011 33% rate
+// threshold by $100. I use 2013, which is the earliest year for which 
+// Tax-Calculator calculates taxes.
+
+// The synthpop5_all synthetic file did poorly on _brk4 by Dan's
+// measure, which was the $ change in the synth file as a % of
+// the $ change in the puf.
+//
+// Here are the $ thresholds for 2013, and several alternatives
+// 2013: [183250.0, 223050.0, 111525.0, 203150.0, 223050.0]
+// subtract 100: [183150.0, 222950.0, 111425.0, 203050.0, 222950.0]
+// subtract 1000: [182250.0, 222050.0, 110525.0, 202150.0, 222050.0]
+// 2014: [186350.0, 226850.0, 113425.0, 206600.0, 226850.0]
+// 2018: [157500.0, 315000.0, 157500.0, 157500.0, 315000.0]
+//
+{
+    "policy": {
+        "II_brk4": {"2013": [183150.0, 222950.0, 111425.0, 203050.0, 222950.0],
+                    "2018": [157500.0, 315000.0, 157500.0, 157500.0, 315000.0]}
+    }
+}

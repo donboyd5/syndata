@@ -1,0 +1,12 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+## child document
+
+Here is a summary of the dataset:
+```{r echo=FALSE}
+print(i)
+
+```

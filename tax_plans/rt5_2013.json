@@ -1,0 +1,25 @@
+// Reduce the 2013 33% rate by 1% point to 32% (or by some different amount).
+// Don Boyd
+//
+// This is intended to be roughly comparable to Dan Feenberg's
+// revenue score item called _rt5, which reduced the 2011 33% rate
+// by 1% point. I use 2013, which is the earliest year for which 
+// Tax-Calculator calculates taxes.
+
+// The synthpop5_all synthetic file did poorly on _rt5 by Dan's
+// measure, which was the $ change in the synth file as a % of
+// the $ change in the puf -- he found that the revenue score of the
+// synthfile, so measured, was too high by about 10% (regardless of
+// whether adjusted synthesized weights were used, or weights constructed
+// from scratch).
+//
+// The change below should capture an approximately similar group of
+// taxpayers to what Dan did. For example, the 2011 33% rate applied to 
+// taxable income of married joint taxpayers from ~ $212-379k, and 
+// in 2013 it applied to marrieds with TI of $223-398k
+// (according to https://en.wikipedia.org/wiki/Income_tax_in_the_United_States#Marginal_tax_rates_since_2008).
+{
+    "policy": {
+        "II_rt5": {"2013": 0.32}
+    }
+}

@@ -1,0 +1,29 @@
+1. Open a command shell in the taxplans directory (e.g., hold shift, right click on folder name, choose PowerShell option)
+2. Copy a version of this command, below, to the shell
+
+Create a dumpvars.txt text file like this:
+c00100 c62100 c09600 c05800 taxbc
+
+# first baseline, then reform
+# tc "d:/tcdir/puf_vs_csv/puf.csv" 2014 --dump --outdir "d:/tcdir/puf_vs_csv"
+# tc "d:/tcdir/puf_vs_csv/cps.csv" 2014 --dump --outdir "d:/tcdir/puf_vs_csv"
+
+# now reforms
+tc "d:/tcdir/puf_vs_csv/puf.csv" 2014 --reform "d:/tcdir/puf_vs_csv/ratecut2014.json" --dump --outdir "d:/tcdir/puf_vs_csv"
+tc "d:/tcdir/puf_vs_csv/cps.csv" 2014 --reform "d:/tcdir/puf_vs_csv/ratecut2014.json" --dump --outdir "d:/tcdir/puf_vs_csv"
+
+tc "d:/tcdir/puf_vs_csv/puf.csv" 2014 --reform "d:/tcdir/puf_vs_csv/reform42014.json" --dump --outdir "d:/tcdir/puf_vs_csv"
+tc "d:/tcdir/puf_vs_csv/cps.csv" 2014 --reform "d:/tcdir/puf_vs_csv/reform42014.json" --dump --outdir "d:/tcdir/puf_vs_csv"
+
+# old
+# tc "D:/Dropbox/OSPC - Shared/IRS_pubuse_2011/puf.csv" 2013 --dvars dumpvars.txt --dump --outdir "d:/tcdir/puf_vs_csv"
+# tc "D:/Dropbox/OSPC - Shared/IRS_pubuse_2011/puf.csv" 2013 --dvars dumpvars.txt --dump --outdir "d:/tcdir/puf_vs_csv"
+# tc "D:/Dropbox/OSPC - Shared/IRS_pubuse_2011/puf.csv" 2014 --dump --outdir "d:/Data/cps_puf"
+# tc "D:/Dropbox/OSPC - Shared/IRS_pubuse_2011/puf.csv" 2014 --dump --outdir "d:/Data/cps_puf"
+# tc "D:/Dropbox/OSPC - Shared/IRS_pubuse_2011/puf.csv" 2013 --reform amtex_2013.json --dvars dumpvars.txt --dump --outdir "d:/tcdir/puf_vs_csv"
+
+
+
+
+# D:\Data\cps_puf
+# D:\tcdir\puf_vs_csv

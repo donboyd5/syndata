@@ -1,0 +1,12 @@
+1. Open a command shell in the taxplans directory (e.g., hold shift, right click on folder name, choose PowerShell option)
+2. Copy a version of this command, below, to the shell
+
+Create a dumpvars.txt text file like this:
+c00100 c62100 c09600 c05800 taxbc
+
+# first baseline, then reform
+tc "D:/Dropbox/OSPC - Shared/IRS_pubuse_2011/puf.csv" 2013 --dvars dumpvars.txt --dump --outdir "d:/tcdir"
+tc "D:/Dropbox/OSPC - Shared/IRS_pubuse_2011/puf.csv" 2013 --reform amtex_2013.json --dvars dumpvars.txt --dump --outdir "d:/tcdir"
+
+# test out a reform on the small file
+tc "D:/tcdir/synth10syn20_small.csv" 2013 --reform tuition0320_2013.json --dvars dumpvars.txt --dump --outdir "d:/tcdir"

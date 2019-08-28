@@ -1,0 +1,42 @@
+
+var <- "wt"     # D~0 p=1
+var <- "e00200" # D~0 p=1
+var <- "e01000" # D = 1.3553e-20, p-value = 1
+var <- "p04470" # D = 1.3553e-20, p-value = 1
+var <- "e01500"
+var <- "e01000"
+x <- comp %>%
+  filter(ftype=="puf", vname==var) %>%
+  .[["value"]]
+y <- comp %>%
+  filter(ftype=="puf", vname==var) %>%
+  .[["value"]]
+ks.test(x, y) # high D low p is good!
+
+x <- rnorm(50)
+y <- runif(30)
+x <- rnorm(1000); y <- runif(1000) # D = 0.528, p-value < 2.2e-16
+# Do x and y come from the same distribution?
+ks.test(x, y) # D = 0.5, p-value = 9.065e-05 high D low p means diff distribs
+
+x <- rnorm(50); y <- rnorm(50)
+x <- rnorm(1e6, mean=10, sd=1); y <- rnorm(1e6, mean=10, sd=1) # D = 0.001094, p-value = 0.5877
+# Do x and y come from the same distribution?
+ks.test(x, y) # D = 0.16, p-value = 0.5487 # low D high p means same distrib
+# names(ks.test(x, y))
+# D is a distance measure, we want it to be small
+
+
+  vname     ks.p
+   <chr>    <dbl>
+ 1 e01500   0.799
+ 2 e01700   0.855
+ 3 e04600   0.987
+ 4 penratio 0.992
+ 5 e00200   0.998
+ 6 e02400   1.000
+ 7 e01000   1.000
+ 8 p04470   1.000
+ 9 MARS     1    
+10 wt       1    
+11 XTOT     1

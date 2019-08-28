@@ -1,0 +1,728 @@
+---
+title: "Compare two synthetic files with PUF"
+date: "`r format(Sys.time(), '%B %d, %Y')`"  # "`r Sys.Date()`"
+output:
+  html_notebook:
+    df_print: paged
+    fig_height: 7
+    fig_width: 9
+    toc: yes
+---
+
+
+```{r notes, include=FALSE}
+# CAUTION: yaml requires proper indentation with spaces or this will become (I think) a regular R markdown file
+# It can be hard to get tables to work properly. It seems like it is best to have chunk output inline.
+  # html_document:
+  #   fig_height: 7
+  #   fig_width: 9
+  #   toc: yes
+  #   toc_depth: 5
+
+# to make a notebook visible from the web, do the following:
+# - commit latest changes to git and push to github
+# - view the notebook by appending it to this link: http://htmlpreview.github.io/
+# - for example, paste the following url into a browser:
+#     http://htmlpreview.github.io/?https://github.com/donboyd5/syndata4/blob/master/r/3c_compare_unweighted_files_html.nb.html
+
+
+```
+
+
+```{r setup, include=FALSE}
+# force the working directory for the notebook file to be the wd of the project - see:
+# https://support.rstudio.com/hc/en-us/community/posts/220826588-Working-directory-in-R-Notebooks
+#  also see the following, which does not look as good
+# https://stackoverflow.com/questions/44816945/why-setting-working-directory-in-r-notebook-doesnt-change-working-directory-in
+# knitr::opts_knit$set(root.dir = normalizePath("path")) # wherre path is desired wd
+
+# knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+
+knitr::opts_chunk$set(echo=FALSE, message=FALSE, warning=FALSE)
+# knitr::opts_chunk$set(fig.width = ..., fig.height = ...)
+# knitr::opts_knit$set(root.dir = here::here())
+
+# READ THIS:
+# https://gist.github.com/jennybc/362f52446fe1ebc4c49f
+
+```
+
+
+```{r clear_warnings, eval=FALSE}
+# run this line to clear any old warning messages
+assign("last.warning", NULL, envir = baseenv())
+
+```
+
+
+
+```{r libs, include=FALSE}
+# source("./r/includes/libraries.r")
+source(file.path(PROJHOME, "r/includes", "libraries.r"))
+library("readxl")
+library("knitr")
+library("kableExtra")
+# search()
+# getwd()
+
+# source("./r/includes/globals_system_specific_boyd.r")
+source(file.path(PROJHOME, "r/includes", "globals_system_specific_boyd.r"))
+source(file.path(PROJHOME, "r/includes", "globals_other.r"))
+source(file.path(PROJHOME, "r/includes", "functions_general.r"))
+# source(file.path(PROJHOME, "r/includes", "functions_general.r"))
+
+```
+
+
+```{r define_comparison_files, include=FALSE}
+synname <- "synthpop10" # synthpop stacked file
+synpufname <- "synpuf20"  # Max's synpuf file
+
+```
+
+
+
+```{r get_vnames, include=FALSE}
+puf.vnames <- get_puf_vnames()
+
+psum <- get_pufbase_sums()
+# psum
+# psum %>% arrange(vname)
+```
+
+
+```{r get_comparison_files, include=FALSE}
+#.. get the cart file and its puf counterpart ----
+pufcart <- read_csv(paste0(globals$tc.dir, synname, "_stack.csv"), 
+         col_types = cols(ftype=col_character(),
+                          msname=col_character(),
+                          .default= col_double()),
+         n_max=-1)
+# glimpse(pufcart)
+# names(pufcart) %>% sort
+
+puf <- pufcart %>% filter(ftype=="puf")
+cart <- pufcart %>% filter(ftype=="syn") %>% mutate(ftype="cart")
+
+#.. get the RF file ----
+rf <- read_csv(paste0(globals$synd, "syntheses/", synpufname, ".csv"), 
+                         col_types = cols(.default= col_double()), 
+                         n_max=-1) %>% 
+  mutate(ftype="rf") %>%
+  setNames(change_case(names(.)))
+# glimpse(rf)
+```
+
+
+```{r define_variable_names, include=FALSE}
+not.rf <- setdiff(names(cart), names(rf))
+not.rf %>% sort
+
+not.cart <- setdiff(names(rf), names(cart))
+not.cart %>% sort
+
+psum %>%
+  filter(vname %in% not.rf)
+
+psum %>%
+  filter(vname %in% not.cart)
+
+psum %>%
+  filter(vname %in% names(rf)) %>%
+  arrange(vname) %>% tail(50)
+
+```
+
+
+```{r create_stacked_file, include=FALSE}
+# get minimum set of names
+usenames <- intersect(names(cart), names(rf))
+usenames %>% sort
+
+stack <- bind_rows(puf %>% dplyr::select(usenames),
+                   cart %>% dplyr::select(usenames),
+                   rf %>% dplyr::select(usenames)) %>%
+  mutate(ftype=factor(ftype, levels=c("puf", "cart", "rf"))) # so that ftype sorts as we want
+count(stack, ftype)
+names(stack)
+```
+
+
+```{r top_vars, include=FALSE}
+# define top income and deduction variables
+psum
+# e00200 e01500 e02400 e02000
+# e19200 e18400 e18500 e19700 [not in stack] e19800
+incvars <- c("e00200", "e01500", "e02400", "e02000", "e26270")
+dedvars <- c("e19200", "e18400", "e18500", "e19800", "e17500")
+setdiff(incvars, names(stack))
+setdiff(dedvars, names(stack))
+```
+
+
+# Summary statistics - mean, median, sd, kurtosis, skewness
+```{r ss_prepdat, include=FALSE}
+epvars <- names(stack)[(names(stack) %>% str_sub(., 1, 1) %in% c("e", "p"))]
+epvars <- setdiff(epvars, "e01500_minus_e01700")
+epvars
+
+a <- proc.time()
+long <- stack %>%
+  dplyr::select(ftype, epvars) %>%
+  # pivot_longer(cols=-ftype, names_to="vname", values_to="value") # 75 secs
+  gather(vname, value, -ftype) # 3 secs
+b <- proc.time()
+b - a
+glimpse(long)
+
+a <- proc.time()
+stats <- long %>%
+  group_by(ftype, vname) %>%
+  summarise(n=n(),
+            n.NA=sum(is.na(value)),
+            mean=mean(value, na.rm=TRUE),
+            median=median(value, na.rm=TRUE), 
+            sd=sd(value, na.rm=TRUE),
+            kurtosis=e1071::kurtosis(value, type=2, na.rm=TRUE),
+            skewness=e1071::skewness(value, type=2, na.rm=TRUE))
+b <- proc.time()
+b - a
+stats %>% ht
+
+# make a wide file of statistics
+wstats <- stats %>%
+  gather(stat, value, -ftype, -vname) %>%
+  spread(ftype, value) %>%
+  mutate(stat=factor(stat, levels=c("n", "n.NA", "mean", "median", "sd", "kurtosis", "skewness"))) %>%
+  arrange(vname, stat) %>%
+  dplyr::select(vname, stat, puf, cart, rf) %>%
+  mutate(cart.diff=cart - puf,
+         rf.diff=rf - puf,
+         cart.pct=cart.diff / puf * 100,
+         rf.pct=rf.diff / puf * 100,
+         worst=case_when(abs(cart.diff) > abs(rf.diff) ~ "cart",
+                         abs(rf.diff) > abs(cart.diff) ~ "rf",
+                         TRUE ~ "tie"))
+# ht(wstats)
+
+```
+
+
+## Counts of which file performed worst on summary statistics, across all continuous variables
+```{r ss_summary}
+wstats %>%
+  filter(!stat %in% c("n", "n.NA")) %>%
+  group_by(stat, worst) %>%
+  summarise(n=n()) %>%
+  spread(worst, n) %>%
+  mutate_at(vars(-stat), ~naz(.)) %>%
+  rename(cart.nworst=cart, rf.nworst=rf) %>%
+  kable(caption="Counts", digits=0, format.args=list(big.mark=",")) %>%
+  kable_styling(full_width = FALSE)
+# %>% footnote(general_title="Source:", general = soinote)
+
+```
+
+
+## Summary statistics for selected large variables
+```{r ss_details, include=FALSE}
+f <- function(vname.in){
+  vdesc <- puf.vnames %>% filter(vname==vname.in) %>% .[["vdesc"]]
+  tab <- wstats %>% 
+    filter(vname==vname.in) %>%
+    filter(!stat %in% c("n", "n.NA")) %>%
+    kable(caption=vdesc,
+          digits=c(0, 0, rep(1, 7), 0), 
+          format.args=list(big.mark=",")) %>%
+    kable_styling(full_width = FALSE)
+  print(tab)
+}
+
+# f(incvars[1])
+```
+
+
+### Important income variables
+```{r}
+l_ply(incvars, f)
+
+```
+
+
+### Important deduction variables
+```{r}
+l_ply(dedvars, f)
+
+```
+
+
+# Univariate plots
+## Kernel density plots, selected variables
+```{r uvplots_kernel}
+kdplot <- function(var){
+  sq10 <- c(0, 1e3, 10e3, 25e3, 50e3, 100e3, 250e3, 500e3, 750e3, 1e6,
+            1.5e6, 2e6, 3e6, 4e6, 5e6, 10e6, 25e6, 50e6, 100e6)
+  xlabs <- scales::comma(sq10 / 1e3)
+  
+  xscale.l10 <- scale_x_log10(name=paste0(var, " in $ thousands, log 10 scale"), breaks=sq10, labels=xlabs)
+  
+  vdesc <- puf.vnames$vdesc[puf.vnames$vname==var]
+  
+  gtitle <- paste0("Kernel density plot for: ", vdesc, " (", var, ")")
+  
+  p <- stack %>%
+    dplyr::select(ftype, value=var) %>%
+    filter(value > 1000) %>%
+    mutate(ftype=factor(ftype, levels=c("puf", "cart", "rf"))) %>%
+    ggplot(aes(value, colour=ftype)) +
+    geom_density(size=1.5) +
+    scale_colour_manual(values=c("blue", "red", "darkgreen")) +
+    # scale_x_continuous(name="value of variable") +
+    xscale.l10 +
+    theme_bw() +
+    ggtitle(gtitle, subtitle="Only includes values above $1,000") +
+    theme(plot.title=element_text(size=12)) +
+    theme(axis.text.x=element_text(angle=45, size=10, hjust=1, colour="black"))
+  print(p)
+  return(p)
+}
+
+```
+
+
+### Income variables, kernel density plots
+```{r uvplots_kd_income}
+l_ply(incvars, kdplot)
+```
+
+
+### Deduction variables, kernel density plots
+```{r uvplots_kd_deducts}
+l_ply(dedvars, kdplot)
+```
+
+
+## Cumulative density function plots, selected variables
+```{r uvplots_cdf}
+# var <- incvars[1]
+cdfplot2 <- function(var, stackdf=stack, vnames=puf.vnames){
+  # print(var)
+  vdesc <- vnames$vdesc[match(var, vnames$vname)]
+  df <- stackdf %>%
+    dplyr::select(ftype, value=var) %>%
+    group_by(ftype) %>%
+    arrange(value) %>%
+    mutate(cum.pct=cumsum(value) / sum(value)) %>%
+    ungroup
+  
+  if(nrow(df) < 100){
+    p <- paste0(var, " has only ", nrow(df), " rows.")
+    return(p)
+  }
+  
+  # create a smaller version of the file because plots with the full file take a long time
+  df_saved <- df
+  # glimpse(df_saved)
+  df <- df_saved %>%
+    mutate(cum.pct=round(cum.pct, 5)) %>%
+    group_by(ftype, cum.pct) %>%
+    summarise(value=mean(value)) %>% 
+    ungroup
+  
+  # find a good minimum x-axis value to start the plot on -- based on a desired cumulative percentage
+  cum.pct.threshold <- .01
+  iminval <- min(which(df$cum.pct[df$ftype=="puf"] > cum.pct.threshold))
+  minval <- df$value[df$ftype=="puf"][iminval]
+  # minval
+  
+  capt <- "- x-axis is log10 scale\n- For display purposes x-axis is truncated at left to start at puf's cum.pct=1%"
+  gtitle <- paste0("Cumulative distribution of unweighted ", var, ": ", vdesc)
+  gsubtitle <- "Aggregate records excluded"
+  ylab <- paste0("Cumulative proportion of the sum of unweighted ", var)
+  
+  # define x scale break points and associated labels
+  sq10 <- c(0, 1e3, 10e3, 25e3, 50e3, 100e3, 250e3, 500e3, 750e3, 1e6,
+            1.5e6, 2e6, 3e6, 4e6, 5e6, 10e6, 25e6, 50e6, 100e6)
+  xlabs <- scales::comma(sq10 / 1e3)
+  xscale.l10 <- scale_x_log10(name=paste0(var, " in $ thousands"), breaks=sq10, labels=xlabs)
+  
+  p <- df %>%
+    filter(value > minval) %>%
+    mutate(ftype=factor(ftype, levels=c("puf", "cart", "rf"))) %>%
+    ggplot(aes(value, cum.pct, colour=ftype)) + 
+    geom_line(size=1.5)
+  
+  p2 <- p +
+    scale_colour_manual(values=c("blue", "red", "darkgreen")) +
+    theme_bw() +
+    ggtitle(gtitle, subtitle=gsubtitle) +  labs(caption=capt) +
+    scale_y_continuous(name=ylab, breaks=c(seq(0, .9, .05), seq(.92, 1, .02))) +
+    xscale.l10 +
+    theme(axis.text.x=element_text(angle=45, size=10, hjust=1, colour="black")) +
+    theme(plot.caption = element_text(hjust=0, size=rel(.8)))
+  
+  print(p2)
+  return(p2)
+}
+# system.time(cdfplot2(incvars[1]))
+
+```
+
+
+### Income variables, CDF plots
+```{r uvplots_cdf_income}
+l_ply(incvars, cdfplot2)
+```
+
+
+### Deduction variables, CDF plots
+```{r uvplots_cdf_deducts}
+l_ply(dedvars, cdfplot2)
+```
+
+
+# Univariate distribution measures
+```{r uvbins_prepdat, include=FALSE}
+# make bins
+ncuts <- function(v, nbins=100) {
+  cuts <- quantile(v, probs = seq(0, 1, length = nbins), na.rm = TRUE, type = 2)
+  # replace endpoints
+  cuts[1] <- -Inf
+  cuts[length(cuts)] <- Inf
+  # cuts <- c(-Inf, as.vector(cuts), Inf)
+  return(cuts)
+}
+
+ncutsdf <- function(v, nbins=100){
+  tibble(bincut=ncuts(v, nbins), cutnum=1:length(bincut))
+}
+
+# get bin cutpoints based upon puf
+glimpse(stack)
+epvars <- names(stack)[(names(stack) %>% str_sub(., 1, 1) %in% c("e", "p"))]
+epvars <- setdiff(epvars, "e01500_minus_e01700")
+# epvars
+# binvars <- epvars[1:5]
+binvars <- epvars
+
+bins.all <- stack %>%
+  filter(ftype=="puf") %>%
+  dplyr::select(binvars) %>%
+  # sample_frac(size=.1) %>%
+  gather(vname, value) %>%
+  group_by(vname) %>%
+  do(ncutsdf(.$value, 1000))
+
+# length(unique(bins.all$vname))
+
+# collapse the bins, as there may be multiple bins for values of zero (for example)
+bins <- bins.all %>%
+  group_by(vname, bincut) %>%
+  summarise(cutnum.min=min(cutnum), cutnum.max=max(cutnum)) %>%
+  group_by(vname) %>%
+  mutate(cutnum=row_number())
+
+getbin <- function(df){
+  brks <- bins$bincut[bins$vname==df$vname[1]]
+  df$valgroup <- cut(df$value, brks)
+  df$binnum <- as.integer(df$valgroup)
+  df$valgroup <- as.character(df$valgroup) # factors don't work once we combine with other variables with different levels
+  return(df)
+}
+
+# determine the bin for each observation
+a <- proc.time()
+bindat <- stack %>%
+  # sample_n(100) %>%
+  dplyr::select(ftype, binvars) %>%
+  gather(vname, value, -ftype) %>%
+  group_by(ftype, vname) %>%
+  do(getbin(.)) %>%
+  ungroup %>%
+  arrange(ftype, vname, binnum)
+b <- proc.time()
+b - a # 2-3 minutes
+
+# collapse by ftype, vname, and bin
+binned <- bindat %>%
+  group_by(ftype, vname) %>%
+  mutate(ntot=n()) %>%
+  group_by(ftype, vname, binnum, valgroup) %>%
+  summarise(n=n(), ntot=first(ntot)) %>%
+  mutate(pct=n / ntot * 100)
+
+# get ssd by ftype, vname
+a <- proc.time()
+bincomp <- binned %>%
+  group_by(vname, binnum, valgroup) %>%
+  mutate(diff=pct - pct[ftype=="puf"],
+         diffsq=diff^2) %>%
+  group_by(ftype, vname) %>%
+  summarise(ssd=sum(diffsq)) %>%
+  filter(ftype!="puf")
+b <- proc.time()
+b - a
+
+```
+
+Relative frequency comparison:
+
+1. Working with just the PUF file:
+    + Sort each variable in ascending order
+    + Divide into 1,000 bins, each with the same approx number of values (0.1% of the values)
+    + Collapse the bins so that all bin cut points are unique. For example if 5% of the values were all zero, then we would have 50 bins where all the values are zero. This step collapses these into one bin with zeros.
+    + Determine the cutpoints for each bin
+
+2. Now, for each of the 3 files (PUF, cart, RF), for each variable:
+    + Count the number of values for each file that are in each bin, using the PUF-based endpoints from Step 1.
+    + Compute the relative frequencies.
+
+3. For the cart and RF files, for each variable:
+    + For each bin, compute the difference between the relative frequency for the file in question (cart or RF), and square it
+    + Construct a summary for the variable: the sum of these squared differences
+
+4.  Construct a file summary: the median of the sum of squared differences computed in Step 3, across all continuous variables
+    
+
+## Relative frequencies - summary across all continuous variables
+```{r uvbins_summary}
+# get file-total summaries, across all variables
+bincomp %>%
+  group_by(vname) %>%
+  mutate(worst=case_when(ftype=="cart" & ssd > ssd[ftype=="rf"] ~ 1,
+                         ftype=="rf" & ssd > ssd[ftype=="cart"] ~ 1,
+                         TRUE ~ 0)) %>%
+  group_by(ftype) %>%
+  summarise(n.worst=sum(worst), ssd.mdn=median(ssd), ssd.mean=mean(ssd)) %>%
+  adorn_totals() %>%
+  mutate_at(vars(-ftype, -n.worst), ~ifelse(ftype=="Total", NA, .)) %>%
+  mutate(n.pct=n.worst / n.worst[ftype=="Total"] * 100) %>%
+  kable(caption="Summary of relative frequency comparison across all continuous variables",
+        digits=c(0, 0, 2, 2, 1)) %>%
+  kable_styling(full_width = FALSE)
+```
+
+## Comparison of relative frequencies for large variables
+```{r uvbins_largevars}
+bincomp %>%
+  spread(ftype, ssd) %>%
+  mutate(abs_diff=abs(rf - cart),
+         worst=ifelse(rf > cart, "rf", "cart")) %>%
+  rename(cart_ssd=cart, rf_ssd=rf) %>%
+  adorn_totals() %>%
+  left_join(psum %>% dplyr::select(vname, vdesc, puf.billions=value)) %>%
+  # arrange(-abs_diff) %>%
+  arrange(-puf.billions) %>%
+  kable(digits=1, format.args=list(big.mark = ',')) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+
+## Examine relative frequencies for wages - why does CART do so poorly?
+
+This shows the first 5 and last 5 bins for wages. It shows that CART does well overall, but because it intentionally avoids reproducing PUF values for wages exactly, it does not have as many exact zero values, although in other ways it fits the distribution well (as the kernel density plot shows).
+
+```{r}
+# why do wages do so poorly??
+f <- function(x, y) (x - y)^2
+wages <- binned %>%
+  filter(vname=="e00200") %>%
+  dplyr::select(ftype, vname, binnum, valgroup, pct) %>%
+  spread(ftype, pct) %>%
+  dplyr::select(vname, binnum, valgroup, puf, cart, rf) %>%
+  mutate_at(vars(cart, rf), list(ssd=~f(., puf))) %>%
+  ungroup %>%
+  filter(row_number() %in% c(1:5, (nrow(.) - 4):nrow(.)))
+
+wages %>%
+  kable(digits=2) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+
+# Correlations
+```{r cor_prepdat, include=FALSE}
+corvars <- names(stack)[(names(stack) %>% str_sub(., 1, 1) %in% c("e", "p"))]
+
+# create a long file with all correlations
+a <- proc.time()
+cor1 <- stack %>%
+  dplyr::select(ftype, corvars) %>%
+  setNames(str_to_lower(names(.))) %>%
+  group_by(ftype) %>%
+  do(cordf(.[, -1])) %>%
+  do(trimcor(.)) %>%
+  separate(combo, c("vname1", "vname2"), sep="-", remove=TRUE) %>%
+  ungroup %>%
+  left_join(puf.vnames %>% dplyr::select(vname1=vname, vdesc1=vdesc)) %>%
+  left_join(puf.vnames %>% dplyr::select(vname2=vname, vdesc2=vdesc))
+b <- proc.time()
+b - a # ~ 2 mins
+
+ht(cor1)
+count(cor1, ftype)
+
+# cor1 %>% 
+#   filter(vname1=="e00200" | vname2=="e00200") %>%
+#   arrange(vname2, ftype)
+
+# cor1 %>% 
+#   filter(vname1=="e00200" | vname2=="e00200") %>%
+#   arrange(desc(abs(value)))
+
+# create a wide file with correlation comparisons 
+cor.comp <- cor1 %>%
+  mutate(ftype=factor(ftype, levels=c("puf", "cart", "rf"))) %>%
+  spread(ftype, value) %>%
+  mutate(diff.cart=cart - puf,
+         diff.rf=rf - puf,
+         diff.worst=pmax(abs(diff.cart), abs(diff.rf)),
+         worst=ifelse(abs(diff.cart) > abs(diff.rf), "cart", "rf"))
+
+# count(cor.comp, worst) %>%
+#   janitor::adorn_totals() %>%
+#   mutate(pct=n / n[worst=="Total"] * 100) %>%
+#   kable(digits=1)
+# 
+# vsize <- 30
+# cor.comp %>%
+#   arrange(desc(diff.worst)) %>%
+#   mutate(vdesc1=str_sub(vdesc1, 1, vsize), vdesc2=str_sub(vdesc2, 1, vsize)) %>%
+#   head(25) %>%
+#   rename(cor.puf=puf, cor.cart=cart, cor.rf=rf) %>%
+#   kable(digits=3)
+# 
+# cor.comp %>%
+#   filter(vname1=="e00200" | vname2=="e00200") %>%
+#   arrange(desc(diff.worst)) %>%
+#   mutate(vdesc1=str_sub(vdesc1, 1, vsize), vdesc2=str_sub(vdesc2, 1, vsize)) %>%
+#   head(25) %>%
+#   rename(cor.puf=puf, cor.cart=cart, cor.rf=rf) %>%
+#   kable(digits=3)
+
+```
+
+
+## Summary of correlations: Counts of worst differences, and median of absolute difference from PUF correlation
+```{r cor_summary}
+tots <- cor.comp %>%
+  summarise(n=n()) %>%
+  mutate(worst="Total")
+
+cor.comp %>%
+  group_by(worst) %>%
+  summarise(n=n(), absdiff.mdn=median(abs(diff.worst))) %>%
+  bind_rows(tots) %>%
+  mutate(n.pct=n / n[worst=="Total"] * 100) %>%
+  kable(digits=c(0, 0, 4, 1), format.args=list(big.mark=",")) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+
+## Differences from PUF correlations, selected variable pairs
+### Highest and lowest puf correlations
+```{r cor_pufhilo}
+vsize <- 30
+nhighlow <- 15
+
+cor.comp %>%
+  mutate(vdesc1=str_sub(vdesc1, 1, vsize), vdesc2=str_sub(vdesc2, 1, vsize)) %>%
+  arrange(desc(puf)) %>%
+  filter(row_number() %in% 1:nhighlow) %>%
+  rename(cor.puf=puf, cor.cart=cart, cor.rf=rf) %>%
+  kable(digits=3, caption="Most-postive PUF correlations") %>%
+  kable_styling(full_width = FALSE)
+
+cor.comp %>%
+  mutate(vdesc1=str_sub(vdesc1, 1, vsize), vdesc2=str_sub(vdesc2, 1, vsize)) %>%
+  arrange(puf) %>%
+  filter(row_number() %in% 1:nhighlow) %>%
+  rename(cor.puf=puf, cor.cart=cart, cor.rf=rf) %>%
+  kable(digits=3, caption="Most-negative PUF correlations") %>%
+  kable_styling(full_width = FALSE)
+
+
+```
+
+### 15 worst correlation differences
+```{r cor_worst}
+vsize <- 30
+cor.comp %>%
+  arrange(desc(diff.worst)) %>%
+  mutate(vdesc1=str_sub(vdesc1, 1, vsize), vdesc2=str_sub(vdesc2, 1, vsize)) %>%
+  arrange(desc(diff.worst)) %>%
+  mutate(vdesc1=str_sub(vdesc1, 1, vsize), vdesc2=str_sub(vdesc2, 1, vsize)) %>%
+  head(15) %>%
+  rename(cor.puf=puf, cor.cart=cart, cor.rf=rf) %>%
+  kable(digits=3) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+### 15 worst differences in correlation with wages
+```{r cor_worst_wages}
+
+vsize <- 30
+cor.comp %>%
+  filter(vname1=="e00200" | vname2=="e00200") %>%
+  mutate(vname=ifelse(vname1=="e00200", vname2, vname1),
+         vdesc=ifelse(vname1=="e00200", vdesc2, vdesc1)) %>%
+  dplyr::select(-c(vname1, vname2, vdesc1, vdesc2)) %>%
+  mutate(vdesc=str_sub(vdesc, 1, vsize)) %>%
+  arrange(desc(diff.worst)) %>%
+  head(15) %>%
+  rename(cor.puf=puf, cor.cart=cart, cor.rf=rf) %>%
+  dplyr::select(vname, vdesc, everything()) %>%
+  kable(caption="Worst correlations with wages, compared to PUF", digits=3) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+# Bivariate plots
+## Selected variables vs. MARS
+```{r bvplots_prep}
+bvplot_MARS <- function(vname){
+  vdesc <- puf.vnames$vdesc[puf.vnames$vname==vname]
+  p <- stack %>%
+    dplyr::select(ftype, MARS, value=vname) %>%
+    filter((vname=="e00200") | (value > 0)) %>%
+    mutate(ftype=factor(ftype, levels=c("puf", "cart", "rf")),
+           marsgroup=case_when(MARS==1 ~ "single",
+                               MARS==2 ~ "married",
+                               MARS %in% 3:4 ~ "other"),
+           marsgroup=factor(marsgroup, levels=c("single", "married", "other")),
+           lvalue=log(value + 1)) %>%
+  ggplot(aes(ftype, lvalue, colour=ftype)) +
+  scale_colour_manual(values=c("blue", "red", "darkgreen")) +
+  geom_boxplot() +
+  theme_bw() +
+  ggtitle("Log 10 of value by marital status and file type",
+          subtitle = vdesc) +
+  facet_wrap(~marsgroup, nrow=1, scales="free_y")
+  print(p)
+  return(p)
+}
+# bvplot_MARS(incvars[1])
+
+```
+
+
+### Income variables, bivariate plots by MARS
+```{r bvplots_MARS_income}
+l_ply(incvars, bvplot_MARS)
+
+```
+
+### Deduction variables, bivariate plots by MARS
+```{r bvplots_MARS_deducts}
+l_ply(dedvars, bvplot_MARS)
+
+```
+
+
+
+
+

@@ -1,0 +1,18 @@
+// Reduce the 2013 amt exclusion by $1,000
+// Don Boyd
+//
+// This is intended to be roughly comparable to Dan Feenberg's
+// revenue score item called _amtex.
+//
+// Tax-Calculator documentation (https://pslmodels.github.io/Tax-Calculator/uguide.html#pol)
+//
+// Here are the amounts for AMT_em from the documentation:
+// 2013: [51900.0, 80800.0, 40400.0, 51900.0, 80800.0]
+// Reducing by $1,000 gives us:
+// "AMT_em": {"2013": [50900.0, 79800.0, 39400.0, 50900.0, 79800.0]}
+// Reducing by $10,000 gives us:
+// "AMT_em": {"2013": [41900.0, 70800.0, 30400.0, 41900.0, 70800.0]}
+//
+{
+    "AMT_em": {"2013": [50900.0, 79800.0, 39400.0, 50900.0, 79800.0]}
+}
