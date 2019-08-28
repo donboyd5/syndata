@@ -32,6 +32,7 @@ synd <- paste0(gd, "synpuf/syntheses/")
 
 puf_fn <- "puf2011.csv"
 synrf_fn <- "synpuf20.csv"
+synrfnd_fn <- "synpuf20_no_disclosures.csv"
 
 
 #****************************************************************************************************
@@ -39,6 +40,7 @@ synrf_fn <- "synpuf20.csv"
 #****************************************************************************************************
 ns <- function(df) {names(df) %>% sort } # names sort 
 
+flag_dups <- function(df) {duplicated(df) | duplicated(df, fromLast=TRUE)} # this gets all dups
 
 #****************************************************************************************************
 #                define disclosure-review variables ####
@@ -66,7 +68,7 @@ tmp
 unique(tmp) # unique will include 1 copy of each kind of record, including duplicates
 
 duplicated(tmp) # doesn't catch that the first record is duplicated
-flag_dups <- function(df) {duplicated(df) | duplicated(df, fromLast=TRUE)} # this gets all dups
+
 flag_dups(tmp) # this is correct
 sum(flag_dups(tmp))
 
@@ -87,6 +89,28 @@ idups[1:100]
 
 puf_undup <- puf2[!idups, ] # get the puf records that are unduplicated as these are the only ones we worry about
 
+
+#****************************************************************************************************
+#                check Max's no-disclosure syn rf file ####
+#****************************************************************************************************
+syn_nd <- read_csv(paste0(synd, synrfnd_fn))
+glimpse(syn_nd)
+ns(syn_nd)
+
+system.time(usyn_nd <- unique(syn_nd[, nodup_vars])) # we only need 1 copy of each record - this will make things faster
+
+stack <- bind_rows(puf_undup %>% mutate(ftype="puf"),
+                   usyn_nd %>% mutate(ftype="syn"))
+
+# any dups in stack will be bad dups!
+bad_dups <- flag_dups(stack[, nodup_vars])
+sum(bad_dups) # counts them twice, once in puf, once in syn
+# 60946 dups!
+stack2 <- stack %>%
+  mutate(dup=ifelse(bad_dups==TRUE, 1, 0))
+sum(stack2$dup)
+
+# good, no dups
 
 #****************************************************************************************************
 #                create a no-dups version of the syn rf file ####
