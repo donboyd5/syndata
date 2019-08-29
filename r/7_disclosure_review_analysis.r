@@ -45,7 +45,7 @@ flag_dups <- function(df) {duplicated(df) | duplicated(df, fromLast=TRUE)} # thi
 #****************************************************************************************************
 #                define disclosure-review variables ####
 #****************************************************************************************************
-df1 <- read_csv(paste0(synd, synrf_fn), n_max=10)
+df1 <- read_csv(paste0(synd, synrf_fn), n_max=0)
 glimpse(df1)
 ns(df1)
 nodup_vars <- setdiff(names(df1), c("RECID", "S006"))

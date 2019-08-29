@@ -8,3 +8,4 @@ A repo for synthesis of microdata tax data from the SOI public use file (PUF). T
 5. Weight the synthesized data
 6. Evaluate weighted file quality
 7. Examine file for disclosure review
+8. Weight final file

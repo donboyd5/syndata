@@ -8,6 +8,8 @@ c00100 c62100 c09600 c05800 taxbc
 # tc "d:/tcdir/puf_vs_csv/puf.csv" 2014 --dump --outdir "d:/tcdir/puf_vs_csv"
 # tc "d:/tcdir/puf_vs_csv/cps.csv" 2014 --dump --outdir "d:/tcdir/puf_vs_csv"
 
+# tc "d:/tax_data/pufsyn_samp.csv" 2013 --dump --outdir "d:/tax_data" # updated locations
+
 # now reforms
 tc "d:/tcdir/puf_vs_csv/puf.csv" 2014 --reform "d:/tcdir/puf_vs_csv/ratecut2014.json" --dump --outdir "d:/tcdir/puf_vs_csv"
 tc "d:/tcdir/puf_vs_csv/cps.csv" 2014 --reform "d:/tcdir/puf_vs_csv/ratecut2014.json" --dump --outdir "d:/tcdir/puf_vs_csv"

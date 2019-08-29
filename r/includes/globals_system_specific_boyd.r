@@ -7,9 +7,12 @@ globals$pufdir <- "D:/Dropbox/OSPC - Shared/IRS_pubuse_2011/" # location of puf2
 globals$synd <- "D:/Google Drive/synpuf/"
 
 # globals$tc.cli <- "C:/ProgramData/Anaconda3/Scripts/tc" # location of Tax-Calculator command-line interface
-globals$tc.cli <- "C:/Users/donbo/Anaconda3/Scripts/tc" # location of Tax-Calculator command-line interface
+# globals$tc.cli <- "C:/Users/donbo/Anaconda3/Scripts/tc" # location of Tax-Calculator command-line interface
+globals$tc.cli <- "C:/ProgramData/Anaconda3/Scripts/tc" # location of Tax-Calculator command-line interface
 
 # private directory for Tax-Calculator record-level output that we don't want moved from this machine
-globals$tc.dir <- "D:/tcdir/"
+globals$tc.dir <- "D:/tax_data/"
 
-globals$taxplans.dir <- "D:/Dropbox/RPrograms PC/OSPC/syndata4/tax_plans/"
+# globals$taxplans.dir <- "D:/Dropbox/RPrograms PC/OSPC/syndata4/tax_plans/"
+globals$taxplans.dir <- "C:/Users/donbo/Dropbox/RPrograms PC/OSPC/syndata/tax_plans/"
+
