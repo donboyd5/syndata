@@ -15,9 +15,10 @@ options(tibble.print_max = 60, tibble.print_min = 60) # if more than 60 rows, pr
 # library("precis")
 
 # library("grDevices")
-# library("knitr")
+library("knitr")
 
 # library("nloptr")
+library("survey")
 
 # devtools::install_github("donboyd5/btools")
 library("btools") # library that I created (install from github)
@@ -70,13 +71,31 @@ Sys.setenv(
 )
 shell("echo %PATH% ", intern= TRUE)
 
-
 #****************************************************************************************************
-#                functions ####
+#                functions - general ####
 #****************************************************************************************************
 ns <- function(df) {names(df) %>% sort } # names sort 
 
 flag_dups <- function(df) {duplicated(df) | duplicated(df, fromLast=TRUE)} # this gets all dups
+
+
+#****************************************************************************************************
+#                functions for constraints ####
+#****************************************************************************************************
+
+nnz <- function(x, wt0) {(x != 0) * 1}
+nz <- function(x, wt0) {(x == 0) * 1}
+npos <- function(x, wt0) {(x > 0) * 1}
+nneg <- function(x, wt0) {(x < 0) * 1}
+
+sumnz <- function(x, wt0) {(x != 0) * x}
+sumpos <- function(x, wt0) {(x > 0) * x}
+sumneg <- function(x, wt0) {(x < 0) * x}
+
+
+#****************************************************************************************************
+#                functions for optimization ####
+#****************************************************************************************************
 
 calc_constraints <- function(weights, data, constraint_vars){
   # weights: numeric vector
@@ -99,7 +118,7 @@ objfn <- function(weights, data, constraints, p=2){
   return(obj)
 }
 
-calibrate_reweight <- function(weights, data, constraints){
+calibrate_reweight <- function(weights, data, constraints, force=TRUE){
   # id = ~0 means no clusters
   sdo <- svydesign(id = ~0, weights = weights, data = data)
   
@@ -121,7 +140,7 @@ calibrate_reweight <- function(weights, data, constraints){
                           eta=weights, 
                           bounds=c(0,Inf),
                           sparse=TRUE, 
-                          force=TRUE)
+                          force=force)
   
   return(calibrated)
 }
@@ -129,7 +148,7 @@ calibrate_reweight <- function(weights, data, constraints){
 uni_opt <- function(method, wts0, data, constraints, objfn=NULL, ...){
   # call any of the methods and get a uniform return value
   
-  methods <- c("simann", "mma", "calibrate")
+  methods <- c("simann", "mma", "calibrate", "ipopt")
   if(!method %in% methods){
     err_msg1 <- paste0("STOP: Method ", method, " not supported. Method must be one of:")
     err_msg2 <- paste(methods, collapse=", ")
@@ -189,6 +208,11 @@ uni_opt <- function(method, wts0, data, constraints, objfn=NULL, ...){
 
 
 #****************************************************************************************************
+#                Ipopt functions ####
+#****************************************************************************************************
+
+
+#****************************************************************************************************
 #                Get puf variable names ####
 #****************************************************************************************************
 puf.vnames <- get_puf_vnames()
@@ -233,6 +257,7 @@ stack_samp <- stack %>%
   group_by(ftype) %>%
   sample_n(1000)
 write_csv(stack_samp, paste0(globals$tc.dir, "pufsyn_samp.csv"))
+
 
 # pick one of these
 #    taxplan.fn -- character variable holding the name (without directory) of the taxplan json file e.g., "rate_cut.json"
@@ -281,7 +306,7 @@ saveRDS(stack2, paste0(globals$tc.dir, outfile))
 
 
 #****************************************************************************************************
-#                weight the files ####
+#                START: weight the files ####
 #****************************************************************************************************
 ffw <- readRDS(paste0(globals$tc.dir, "stack_for_weighting.rds")) # file for weighting
 glimpse(ffw)
@@ -321,13 +346,7 @@ samp <- ffw %>%
 count(samp, ftype)
 
 # now calculate constraints
-nnz <- function(x, wt0) ((x != 0) * 1)
-npos <- function(x, wt0) ((x > 0) * 1)
-nneg <- function(x, wt0) ((x < 0) * 1)
 
-sumnz <- function(x, wt0) ((x != 0) * x)
-sumpos <- function(x, wt0) ((x > 0) * x)
-sumneg <- function(x, wt0) ((x < 0) * x)
 
 #.. define vars ----
 # cbasevars <- c("n", "pop", "c00100", "taxbc", "e00200", "e00300") #, "e00400")
@@ -349,21 +368,25 @@ sampx <- samp %>%
   select(ftype, RECID, wt0, cbasevars) %>%
   mutate_at(vars(cbasevars), list(npos = ~npos(., wt0),
                                   nneg = ~nneg(., wt0),
-                                  nnz = ~nnz(., wt0)))
+                                  nnz = ~nnz(., wt0),
+                                  sumpos = ~sumpos(., wt0),
+                                  sumneg = ~sumneg(., wt0)))
 # ,nneg = ~nneg(., wt0))            
 glimpse(sampx)
 
 data <- sampx %>%
-  filter(ftype=="syn_nd")
+  filter(ftype=="syn_nd") %>%
+  select(ftype, RECID, wt0, contains("_n"), contains("_sum"))
+glimpse(data)
 
-dupcols <- which(duplicated(as.matrix(data), MARGIN = 2))
+system.time(dupcols <- which(duplicated(as.matrix(data), MARGIN = 2)))
 dupcols
 ns(dupcols)
 data <- data[, -dupcols]
 
 constraint_vals <- sampx %>%
   group_by(ftype) %>%
-  summarise_at(vars(cbasevars, contains("_n")),
+  summarise_at(vars(contains("_n"), contains("_sum")),
                list(~ sum(. * wt0))) %>%
   ungroup
 constraint_vals
@@ -386,11 +409,8 @@ t(constraints)
 
 df_pdiff <- pdiff(data$wt0, data, constraints)
 t(df_pdiff)
-
-calc_constraints(data$wt0, data, good_constraints)
-
+# calc_constraints(data$wt0, data, good_constraints)
 # pct difference from constraint targets at a few possible starting points
-
 pdiff(data$wt0, data, constraints) %>% round(2)
 
 tmp <- uni_opt(data$wt0, data, constraints, method="calibrate", objfn=objfn, maxiter=10)
@@ -426,17 +446,470 @@ d3 %>%
   mutate(ratio=wt1 / wt0) %>%
   do(qtiledf(.$ratio, probs=c(0, .01, .05, .1, .25, .5, .75, .9, .95, .99, 1)))
 
+d3 %>%
+  filter(ftype=="syn_nd") %>%
+  do(qtiledf(.$wt1, probs=c(0, .01, .05, .1, .25, .5, .75, .9, .95, .99, 1)))
+
+d3 %>%
+  filter(ftype=="syn_nd", wt1 < 2) %>%
+  do(qtiledf(.$wt1, probs=c(0, .01, .05, .1, .25, .5, .75, .9, .95, .99, 1)))
+
+
 # if needed, change calibrate option epsilon -- default is 1e-7
 
+
 #****************************************************************************************************
-#               function for uniform optimization call ####
+#               automate ####
 #****************************************************************************************************
-library("survey")
+#.. 1. Define subsets that have approximately 500-1000 records ----
+puf <- ffw %>%
+  filter(ftype=="puf")
+count(puf, MARS)
+
+ntarget <- 2000
+nmin <- 1500
+
+ngroups <- puf %>%
+  mutate(agige0=ifelse(c00100 >= 0, 1, 0)) %>%
+  select(agige0, MARS, c00100) %>%
+  group_by(agige0, MARS) %>%
+  arrange(c00100) %>%
+  mutate(ngroups=n() / ntarget,
+         grp=ntile(n=ngroups)) %>%
+  group_by(agige0, MARS, grp) %>%
+  summarise(n=n(), 
+            agimin=min(c00100), 
+            agimax=max(c00100)) %>%
+  mutate(grp=ifelse(n < nmin, 
+                    ifelse(grp==1, grp + 1, grp - 1), # can cause grp numbers to skip
+                    grp)) %>%
+  group_by(agige0, MARS, grp) %>%
+  summarise(n_final=sum(n),
+            agimin=min(agimin),
+            agimax=max(agimax)) %>%
+  group_by(agige0, MARS) %>%
+  mutate(grp=row_number(), ngrps=max(grp)) %>% # ensure that grp numbers start at 1 and rise sequentially
+  ungroup
+ngroups %>% print(n = Inf)
+quantile(ngroups$n_final)
+
+group_agibreaks <- ngroups %>%
+  group_by(agige0, MARS) %>%
+  mutate(agimax_prior=lag(agimax),
+         agimin_next=lead(agimin),
+         agilow_ge=case_when(agige0==0 & grp==1 ~ -Inf,
+                             agige0==1 & grp==1 ~ 0,
+                             TRUE ~  (agimin + agimax_prior) / 2),
+         agihigh_lt=case_when(agige0==0 & grp==max(grp) ~ 0,
+                              agige0==1 & grp==max(grp) ~ Inf,
+                              TRUE ~ (agimax + agimin_next) / 2),
+         range=agihigh_lt - agilow_ge) %>%
+  select(-agimax_prior, -agimin_next) %>%
+  ungroup %>%
+  arrange(MARS, agilow_ge) %>%
+  mutate(ugroup=row_number()) %>% # universal group (group within the entire universe)
+  select(agige0, MARS, grp, ngrps, ugroup, everything())
+  
+# checks:
+group_agibreaks %>% 
+  print(n = Inf) %>% 
+  kable(digits=0, format.args = list(big.mark=","))
+
+# look at first and last rec in each agege0, MARS grouping
+group_agibreaks %>% 
+  filter(grp==1) %>% 
+  kable(digits=0, format.args = list(big.mark=","))
+
+group_agibreaks %>% 
+  filter(grp==ngrps) %>% 
+  kable(digits=0, format.args = list(big.mark=","))
+
+group_agibreaks %>%
+  group_by(MARS) %>%
+  summarise(ngrps=n(), nsum=sum(n_final), nmin=min(n_final), nmax=max(n_final)) %>%
+  mutate(totgrps=sum(ngrps), totn=sum(nsum))
+
+# now loop through the data and put ugroup on each record
+count(ffw, ftype)
+
+getgroup <- function(agivec, MARSval){
+  # MARSval <- 1
+  # agivec <- c(-Inf, -1000, 0, 1000, 20e3, Inf)
+  
+  gindex <- function(agival, agilow_ge_vec) {
+    ifelse(agival < Inf, 
+           min(which(agival < agilow_ge_vec)) - 1,
+           length(agilow_ge_vec) - 1)
+  }
+  
+  breaks <- group_agibreaks %>%
+    filter(MARS==MARSval) %>%
+    arrange(agilow_ge) %>%
+    select(MARS, ugroup, agilow_ge, agihigh_lt)
+  
+  agilow_ge_vec <- c(breaks %>% .[["agilow_ge"]], Inf)
+  
+  indexes <- gindex(1.5e6, agilow_ge_vec)
+  indexes <- sapply(agivec, gindex, agilow_ge_vec)
+  ugroup <- breaks$ugroup[indexes]
+  return(ugroup)
+}
+
+a <- proc.time()
+ffw2 <- ffw %>%
+  group_by(MARS) %>%
+  mutate(ugroup=getgroup(c00100, first(MARS)))
+b <- proc.time()
+b - a # 18 secs
+
+# check
+check <- ffw2 %>%
+  select(ftype, MARS, c00100, ugroup) %>%
+  group_by(ftype, ugroup) %>%
+  sample_n(3) %>%
+  ungroup %>%
+  arrange(ftype, ugroup, c00100)
+check %>% filter(ftype=="puf")
+# looks good
+
+#..2. Now that groups are defined, get constraints for each group ----
+tcvars <- c("c00100", "taxbc", "c09600", "c05800")
+priority1 <- c("e00200", "e00300", "e00400", "e00600", "e00650",
+               "e00900", "e01500", "e01700")
+priority2 <- c("e02400", "e02000", 
+               "e26270", "e19200", "p23250", "e18400", "e01400")
+priority3 <- c("e18500", "e19800", "e17500", "e20400", "e02300",
+               "e20100", "e00700")
+# `e02500`, `e59560` and `e24516` no in our data
+# cbasevars <- c(tcvars, priority1, priority2, priority3)
+cbasevars <- c(tcvars, priority1)
+
+# get constraint coefficients
+ccoef <- ffw2 %>%
+  ungroup %>%
+  select(ftype, RECID, MARS, ugroup, wt0, cbasevars) %>%
+  mutate_at(vars(cbasevars), list(npos = ~npos(., wt0),
+                                  nz = ~nneg(., wt0),
+                                  sumpos = ~sumpos(., wt0),
+                                  sumneg = ~sumneg(., wt0)))
+glimpse(ccoef)
+all_constraint_vars <- ccoef %>%
+  select(contains("_n"), contains("_sum")) %>%
+  names(.)
+
+a <- proc.time()
+all_constraint_vals <- ccoef %>%
+  # filter(ugroup %in% 1:2) %>%
+  group_by(ftype, ugroup) %>%  
+  do(calc_constraints(.$wt0, ., all_constraint_vars) %>% 
+       enframe %>%
+       spread(name, value))
+b <- proc.time()
+b - a
+glimpse(all_constraint_vals)
+
+fdiff <- function(x, puf) x - puf
+fpdiff <- function(x, puf) fdiff(x, puf) / puf * 100
+pdiffs <- all_constraint_vals %>%
+  gather(variable, value, -ftype, -ugroup) %>%
+  spread(ftype, value) %>%
+  mutate_at(vars(syn, syn_nd),
+            list(diff = ~fdiff(., puf),
+                 pdiff= ~fpdiff(., puf)))
+
+# now find good constraints for each group, within each non-puf ftype:
+# a) drop constraints where 
+
+# b) drop duplicate constraints that have identical concoefs (keep the first)
+getgoodcols <- function(data){
+  # get names of non-duplicated constraint coefficients
+  dupcols <- which(duplicated(as.matrix(data), MARGIN = 2))
+  df <- tibble(good_constraint=setdiff(names(data), names(dupcols)))
+  return(df)
+}
+
+a <- proc.time()
+good_con <- ccoef %>%
+  filter(ftype != "puf") %>%
+  # filter(ugroup %in% 1:2) %>%
+  group_by(ftype, ugroup) %>%
+  do(getgoodcols(.[,all_constraint_vars]))
+b <- proc.time()
+b - a # only 13 secs
+glimpse(good_con)
+count(good_con, ftype, ugroup)
+
+# get good pdiffs
+good_pdiffs <- pdiffs %>%
+  select(ugroup, good_constraint=variable, contains("pdiff")) %>%
+  gather(ftype, pdiff, -ugroup, -good_constraint) %>%
+  mutate(ftype=str_remove(ftype, "_pdiff")) %>%
+  filter(!is.na(pdiff))
+
+# combine them
+good_con2 <-
+  good_con %>%
+  left_join(good_pdiffs) %>%
+  filter(abs(pdiff) < 100)
+good_con2
+good_con2 %>% filter(ftype=="syn_nd", ugroup==1)
+pdiffs %>% filter(ftype=="syn_nd", ugroup==1)
+count(good_con2, ftype, ugroup) %>% filter(ftype=="syn_nd") %>% arrange(-n) %>% ht(20)
+
+
+#.3. Run the optimization ----
+glimpse(all_constraint_vars)
+glimpse(ccoef)
+
+
+getwts <- function(df, all_constraints, good_constraints){
+  ftype.in <- first(df$ftype)
+  ugroup.in <- first(df$ugroup)
+  
+  convars <- good_constraints %>%
+    filter(ftype==ftype.in,
+           ugroup==ugroup.in) %>%
+    .[["good_constraint"]]
+
+  constraints <- all_constraints %>%
+    ungroup %>%
+    filter(ftype=="puf", # IMPORTANT!
+           ugroup==ugroup.in) %>%
+    select(convars)
+  
+  calib_result <- calibrate_reweight(df$wt0, df[, convars], constraints)
+  
+  fname <- paste0("calib", ugroup.in, ".rds")
+  saveRDS(calib_result, paste0("d:/temp/", fname))
+  df$wt1 <- unname(weights(calib_result))
+  return(df)
+}
+
+calibrate_reweight <- function(weights, data, constraints){
+  # id = ~0 means no clusters
+  sdo <- svydesign(id = ~0, weights = weights, data = data)
+  
+  pop_totals <- constraints %>% 
+    gather(vname, value) %>%
+    deframe
+  
+  eps <- abs(pop_totals * .005)
+  
+  # pop_totals <- pop_totals[-1] # djb skipping this step
+  
+  frm_string <- paste0("~ ", paste(names(pop_totals), collapse=" + "), " - 1")
+  frm <- as.formula(frm_string)
+  
+  # note that logit calibration requires finite bounds
+  fn <- c("linear","raking","logit")
+  calibrated <- calibrate(sdo, 
+                          formula=frm, 
+                          population=pop_totals, 
+                          calfun=fn[1], 
+                          # eta=weights, 
+                          # bounds=c(-Inf,Inf),
+                          # bounds=c(0.1,Inf),
+                          bounds=c(0.00001, 1000),
+                          bounds.const=FALSE, # default FALSE
+                          # trim=c(0, Inf),
+                          epsilon=eps, # default 1e-7
+                          sparse=TRUE, 
+                          force=FALSE)
+  
+  return(calibrated)
+}
+
+
+a <- proc.time()
+opt <- ccoef %>%
+  filter(ftype=="syn_nd") %>%
+  filter(ugroup %in% 1:1) %>%
+  group_by(ftype, ugroup) %>%
+  do(getwts(., all_constraint_vals, good_con2)) %>%
+  ungroup
+b <- proc.time()
+b - a
+glimpse(opt)
+quantile(opt$wt1)
+# linear
+# user  system elapsed 
+# 237.60   33.90  273.47 
+# raking
+
+# logit
+(n <- max(opt$ugroup))
+getpiece <- function(ugroup){
+  fname <- paste0("calib", ugroup.in, ".rds")
+  readRDS(paste0("d:/temp/", fname))
+}
+optlist <- llply(1:1, getpiece, .progress="text")
+str(optlist[[1]])
+attributes(optlist[[1]]$postStrata[[1]]$w)$failed
+attributes(optlist[[1]]$postStrata$eta)
+
+failed <- laply(1:n, function(i) attributes(optlist[[i]]$postStrata[[1]]$w)$failed)
+
+objcomp <- tibble(i=1:length(max.obj), synpuf17=max.obj, synthpop8=my.obj)
 
 
 
 
+# check <- readRDS("d:/temp/calib.rds")
+# summary(check)
+# str(check)
+# weights(check)[1:10]
+# 315.750030 364.676601   2.490171   9.447461   2.375099 
+opt %>% filter(row_number() <=5) %>% select(ftype, ugroup, wt0, wt1) %>% as.data.frame()
 
+count(opt, ftype, ugroup)
+opt %>% select(ftype, ugroup, wt0, wt1)
+tmp <- opt %>% 
+  mutate(ratio=wt1 / wt0) 
+
+quantile(tmp$ratio)
+
+check <- opt %>%
+  select(-RECID) %>%
+  gather(variable, value, -ftype, -MARS, -ugroup, -wt0, -wt1) %>%
+  group_by(ftype, MARS, ugroup, variable) %>%
+  summarise(sum0=sum(value * wt0), sum1=sum(value * wt1)) %>%
+  left_join(all_constraint_vals %>%
+              ungroup %>%
+              filter(ftype=="puf") %>%
+              select(-ftype) %>%
+              gather(variable, target, -ugroup)) %>%
+  left_join(good_con2 %>% ungroup %>% filter(ftype=="syn_nd") %>% select(ugroup, variable=good_constraint) %>% mutate(good=TRUE)) %>%
+  select(ftype, MARS, ugroup, variable, good, sum0, target, sum1)
+glimpse(check)
+
+check %>%
+  filter(str_detect(variable, "_")) %>%
+  mutate(cnum=row_number(),
+         pdiff0=sum0 / target * 100 - 100,
+         pdiff1=sum1 / target * 100 - 100,
+         diff0=sum0 - target,
+         diff1=sum1 - target) %>%
+  select(cnum, everything()) %>%
+  arrange(-abs(diff1)) %>%
+  head(100) %>%
+  kable(digits=c(rep(0, 7), 1, 1, 0, 0), format.args = list(big.mark=","))
+
+check %>%
+  filter(str_detect(variable, "_")) %>%
+  filter(ugroup==1) %>%
+  mutate(cnum=row_number(),
+         pdiff0=sum0 / target * 100 - 100,
+         pdiff1=sum1 / target * 100 - 100,
+         diff0=sum0 - target,
+         diff1=sum1 - target) %>%
+  select(cnum, everything()) %>%
+  arrange(-abs(diff1)) %>%
+  head(100) %>%
+  kable(digits=c(rep(0, 7), 1, 1, 0, 0), format.args = list(big.mark=","))
+
+bad <- check %>%
+  filter(str_detect(variable, "_")) %>%
+  mutate(cnum=row_number(),
+         pdiff0=sum0 / target * 100 - 100,
+         pdiff1=sum1 / target * 100 - 100,
+         diff0=sum0 - target,
+         diff1=sum1 - target) %>%
+  select(cnum, everything()) %>%
+  group_by(ugroup) %>%
+  summarise(n=n(), nbad=sum(abs(pdiff1) > 10, na.rm=TRUE))
+bad %>%
+  arrange(-nbad)
+# ugroup     n  nbad
+# <int> <int> <int>
+#   1     12   104    58
+# 2     56   104    19
+# 3    144   104    18
+# 4     55   104    16
+# 5    147   104    13
+# 6    133   104     7
+# 7    142   104     7
+# 8    143   104     7
+# 9    148   104     7
+# 10     54   104     6
+# 11    134   104     6
+# 12    136   104     6
+
+# E20100 Other than cash contributions
+# E26270 Combined partnership and S corporation net income/loss (+/-)
+# E19200 Total interest paid deduction
+
+# devtools::install_github("tidyverse/multidplyr")
+# library("multidplyr")
+# cluster <- new_cluster(4)
+# 
+# ccoef2 <- ccoef %>% 
+#   filter(ftype != "puf") %>%
+#   group_by(ftype, ugroup) %>%
+#   partition(cluster)
+# 
+# good_con2 <- ccoef2 %>%
+#   select(ftype, ugroup, all_constraint_vars) %>%
+#   do(getgoodcols(.)) %>%
+#   collect()
+
+calc_constraints(tmp$wt0, tmp, all_constraint_vars) %>%
+  enframe %>%
+  spread(name, value)
+
+tmp %>%
+  do(calc_constraints(.$wt0, ., all_constraint_vars) %>% 
+       enframe %>%
+       spread(name, value))
+
+all_data <- ccoef %>%
+  select(ftype, RECID, MARS, ugroup, wt0, all_constraint_vars)
+glimpse(data)
+
+system.time(dupcols <- which(duplicated(as.matrix(data %>% filter(ugroup==4)), MARGIN = 2)))
+dupcols
+ns(dupcols)
+data <- data[, -dupcols]
+
+constraint_vals <- sampx %>%
+  group_by(ftype) %>%
+  summarise_at(vars(contains("_n"), contains("_sum")),
+               list(~ sum(. * wt0))) %>%
+  ungroup
+constraint_vals
+
+# identify bad constraints
+constraints_all <- constraint_vals %>%
+  filter(ftype=="puf") %>%
+  select(-ftype)
+
+tmp <- pdiff(data$wt0, data, constraints_all %>% select(one_of(names(data))))
+t(tmp[1, ])
+good_constraints <- names(tmp)[which(!is.na(tmp[1, ]))]
+good_constraints %>% sort
+
+constraints <- constraint_vals %>%
+  filter(ftype=="puf") %>%
+  select(good_constraints)
+
+t(constraints)
+
+df_pdiff <- pdiff(data$wt0, data, constraints)
+t(df_pdiff)
+# calc_constraints(data$wt0, data, good_constraints)
+# pct difference from constraint targets at a few possible starting points
+pdiff(data$wt0, data, constraints) %>% round(2)
+
+tmp <- uni_opt(data$wt0, data, constraints, method="calibrate", objfn=objfn, maxiter=10)
+str(tmp)
+
+
+
+#..3. Now that groups are defined, we can run dplyr to do the optimization ----
+calib_result <- calibrate_reweight(wts0, data, constraints)
+
+ffw2 %>%
+  filter(ugroup==4) %>%
+  group_by(ugroup)
 
 
 
@@ -1646,3 +2119,62 @@ opx <- optimx(x0, fn=eval_f_full_scaled, gr=eval_grad_f_full_scaled, hess=NULL,
 
 
 
+# library("doParallel")
+# cl <- makeCluster(6)
+# registerDoParallel(cl)
+# 
+# packages <- c("magrittr", "tidyverse", "dplyr", "survey")
+# # CAUTION:  DO NOT PASS large items as function arguments
+# # instead export them
+# xport <- c("all_constraint_vals", "good_con", "ccoef", "getwts", "calibrate_reweight") 
+# popts <- list(.packages=packages, .export=xport)
+# popts
+# 
+# rungroup <- function(ugroup.in) {
+#   df <- ccoef %>%
+#     filter(ftype=="syn_nd") %>%
+#     filter(ugroup==ugroup.in)
+#     
+#   df2 <- getwts(df, all_constraint_vals, good_con)
+#   return(df2)
+# }
+# 
+# a <- proc.time()
+# # warn <- options()$warn
+# # options(warn=-1)
+# d <- ldply(1:164, .progress="text", .parallel=TRUE, .paropts=popts, .fun=rungroup)
+# # d1 <- llply(4:4, .progress="text", .parallel=FALSE, .paropts=popts, .fun=rungroup)
+# # options(warn=warn)
+# b <- proc.time()
+# b - a # 210 secs - not really much savings
+
+# glimpse(d)
+# count(d, ugroup)
+
+# library("multidplyr")
+# cluster <- new_cluster(4)
+# a <- proc.time()
+# opt2 <- ccoef %>%
+#   filter(ftype=="syn_nd") %>%
+#   # filter(ugroup %in% 1:10) %>%
+#   group_by(ftype, ugroup) %>%
+#   partition(cluster) %>%
+#   do(getwts(., all_constraint_vals, good_con)) %>%
+#   collect() %>%
+#   ungroup
+# b <- proc.time()
+# b - a
+
+
+# library("multidplyr")
+# cluster <- new_cluster(4)
+# 
+# ccoef2 <- ccoef %>% 
+#   filter(ftype != "puf") %>%
+#   group_by(ftype, ugroup) %>%
+#   partition(cluster)
+# 
+# good_con2 <- ccoef2 %>%
+#   select(ftype, ugroup, all_constraint_vars) %>%
+#   do(getgoodcols(.)) %>%
+#   collect()
