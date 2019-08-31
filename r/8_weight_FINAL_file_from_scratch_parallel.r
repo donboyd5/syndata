@@ -19,6 +19,7 @@ library("knitr")
 
 # library("nloptr")
 library("survey")
+library("ipoptr")
 
 # devtools::install_github("donboyd5/btools")
 library("btools") # library that I created (install from github)
@@ -31,6 +32,8 @@ source("./r/includes/globals_system_specific_boyd.r") # use a different version 
 source("./r/includes/globals_other.r")
 
 source("./r/includes/functions_general.r")
+
+source("./r/includes/functions_ipopt.r")
 
 # functions specific to the weighting from scratch approach:
 source("./r/includes/functions_weight_from_scratch.r")
@@ -109,6 +112,7 @@ pdiff <- function(weights, data, constraints) {
   (calculated_constraints - constraints) / constraints * 100
 }
 
+
 objfn <- function(weights, data, constraints, p=2){
   # this objfn scales the data and constraint values used in the obj calculation
   calculated_constraints <- calc_constraints(weights, data, names(constraints))
@@ -117,6 +121,76 @@ objfn <- function(weights, data, constraints, p=2){
   obj <- sum(diff_to_p)
   return(obj)
 }
+
+
+define_jac_g_structure_dense <- function(n_constraints, n_variables){
+  # list with n_constraints elements
+  # each is 1:n_variables
+  lapply(1:n_constraints, function(n_constraints, n_variables) 1:n_variables, n_variables)
+} 
+# eval_jac_g_structure_dense <- define_jac_g_structure_dense(n_constraints=2, n_variables=4)
+
+
+eval_jac_g_dense <- function(x, inputs){
+  # the Jacobian is the matrix of first partial derivatives of constraints (these derivatives may be constants)
+  # this function evaluates the Jacobian at point x
+  
+  # This is the dense version that returns a vector with one element for EVERY item in the Jacobian (including zeroes)
+  # Thus the vector has n_constraints * n_variables elements
+  # first, all of the elements for constraint 1, then all for constraint 2, etc...
+  
+  # because constraints in this problem are linear, the derivatives are all constants
+  
+  # ipoptr requires that ALL functions receive the same arguments, so the inputs list is passed to ALL functions
+  
+  return(inputs$cc_dense)
+}
+
+eval_g_dense <- function(x, inputs){
+  unname(calc_constraints(inputs$wt * x, inputs$data, inputs$constraint_vars))
+}
+
+# eval_g_dense(x0, inputs)
+# eval_jac_g_dense(x0, inputs)
+# weights <- data$wt0
+
+# now create the dense hessian
+# eval_h_dense <- function(x, obj_factor, hessian_lambda, inputs){
+#   # The Hessian matrix has many zero elements and so we set it up as a sparse matrix
+#   # We only keep the (potentially) non-zero values that run along the diagonal.
+#   
+#   # http://www.derivative-calculator.net/
+#   # w{x^p + x^(-p) - 2}                                 objective function
+#   # w{px^(p-1) - px^(-p-1)}                             first deriv
+#   # p*w*x^(-p-2)*((p-1)*x^(2*p)+p+1)                    second deriv
+#   
+#   # make it easier to read:
+#   p <- inputs$p
+#   w <- inputs$wt
+#   
+#   hess <- obj_factor * 
+#     { p*w*x^(-p-2) * ((p-1)*x^(2*p)+p+1) }
+#   
+#   return(hess)
+# }
+
+get_tols <- function(tolerances, constraints, default=0){
+  # default should be in 0:Inf
+  # tolerances is data frame with cols variable and tol
+  # constraints is 1-row data frame with cols for constraints
+  # row has constraint values
+  # return: named vector with a tolerance for each constraint
+  tols <- rep(default, ncol(constraints))
+  names(tols) <- names(constraints)
+  
+  var_indexes <- match(names(constraints), tolerances$variable)
+  tol_subset <- tolerances[var_indexes, ]
+  tols[tol_subset$variable] <- tol_subset$tol
+  # tols
+  return(tols)
+}
+# get_tols(tolerances, constraints, .01)
+
 
 calibrate_reweight <- function(weights, data, constraints, force=TRUE){
   # id = ~0 means no clusters
@@ -205,6 +279,69 @@ uni_opt <- function(method, wts0, data, constraints, objfn=NULL, ...){
   }
   return(result)
 }
+
+weights <- df$wt0
+data <- df[, convars]
+constraints
+ugroup.in
+
+ipopt_reweight <- function(weights, data, constraints, tolerances, ugroup.in){
+  # arguments for all functions passed to ipoptr must be x, inputs
+  inputs <- list()
+  inputs$p <- 2
+  inputs$wt <- weights
+  inputs$data <- data
+  inputs$constraint_vars <- names(constraints)
+  inputs$cc_dense <- c(as.matrix(data[, names(constraints)] * weights)) # flattens the cc matrix
+  
+  xlb <- rep(0, nrow(data))
+  xub <- rep(1000, nrow(data))
+  x0 <- rep(1, nrow(data))
+  
+  # if(is.null(tolerances)) {
+  #   tolerances <- tribble(
+  #     ~variable, ~tol,
+  #     "c00100", .001
+  #   )
+  # }
+  
+  tol <- get_tols(tolerances, constraints, default=.01)
+  cvec <- t(constraints[1, ]) %>% as.vector
+  clb <- (cvec - tol * abs(cvec)) %>% unname
+  cub <- cvec + tol * abs(cvec)
+  
+  eval_jac_g_structure_dense <- define_jac_g_structure_dense(
+    n_constraints=ncol(data[, names(constraints)]), 
+    n_variables=nrow(data[, names(constraints)]))
+  
+  eval_h_structure <- lapply(1:length(inputs$wt), function(x) x) # diagonal elements of our Hessian
+  
+  opts <- list("print_level" = 0,
+               "file_print_level" = 5, # integer
+               "linear_solver" = "ma57", # mumps pardiso ma27 ma57 ma77 ma86 ma97
+               "max_iter"=200,
+               # "derivative_test"="first-order",
+               # "derivative_test_print_all"="yes",
+               "output_file" = "syntarget.out")
+  
+  result <- ipoptr(x0 = weights,
+                   lb = xlb,
+                   ub = xub,
+                   eval_f = eval_f_xtop, # arguments: x, inputs
+                   eval_grad_f = eval_grad_f_xtop,
+                   eval_g = eval_g_dense, # constraints LHS - a vector of values
+                   eval_jac_g = eval_jac_g_dense,
+                   eval_jac_g_structure = eval_jac_g_structure_dense,
+                   eval_h = eval_h_xtop, # the hessian is essential for this problem
+                   eval_h_structure = eval_h_structure,
+                   constraint_lb = clb,
+                   constraint_ub = cub,
+                   opts = opts,
+                   inputs = inputs)
+  
+  return(result)
+}
+
 
 
 #****************************************************************************************************
@@ -362,6 +499,7 @@ priority3 <- c("e18500", "e19800", "e17500", "e20400", "e02300",
                "e20100", "e00700")
 # `e02500`, `e59560` and `e24516` no in our data
 cbasevars <- c(tcvars, priority1, priority2, priority3)
+cbasevars <- c(tcvars)
 
 # extended sample
 sampx <- samp %>%
@@ -563,13 +701,13 @@ b <- proc.time()
 b - a # 18 secs
 
 # check
-check <- ffw2 %>%
-  select(ftype, MARS, c00100, ugroup) %>%
-  group_by(ftype, ugroup) %>%
-  sample_n(3) %>%
-  ungroup %>%
-  arrange(ftype, ugroup, c00100)
-check %>% filter(ftype=="puf")
+# check <- ffw2 %>%
+#   select(ftype, MARS, c00100, ugroup) %>%
+#   group_by(ftype, ugroup) %>%
+#   sample_n(3) %>%
+#   ungroup %>%
+#   arrange(ftype, ugroup, c00100)
+# check %>% filter(ftype=="puf")
 # looks good
 
 #..2. Now that groups are defined, get constraints for each group ----
@@ -583,6 +721,7 @@ priority3 <- c("e18500", "e19800", "e17500", "e20400", "e02300",
 # `e02500`, `e59560` and `e24516` no in our data
 # cbasevars <- c(tcvars, priority1, priority2, priority3)
 cbasevars <- c(tcvars, priority1)
+# cbasevars <- c(tcvars)
 
 # get constraint coefficients
 ccoef <- ffw2 %>%
@@ -593,6 +732,7 @@ ccoef <- ffw2 %>%
                                   sumpos = ~sumpos(., wt0),
                                   sumneg = ~sumneg(., wt0)))
 glimpse(ccoef)
+
 all_constraint_vars <- ccoef %>%
   select(contains("_n"), contains("_sum")) %>%
   names(.)
@@ -605,7 +745,7 @@ all_constraint_vals <- ccoef %>%
        enframe %>%
        spread(name, value))
 b <- proc.time()
-b - a
+b - a # 10 secs
 glimpse(all_constraint_vals)
 
 fdiff <- function(x, puf) x - puf
@@ -647,13 +787,13 @@ good_pdiffs <- pdiffs %>%
   filter(!is.na(pdiff))
 
 # combine them
-good_con2 <-
-  good_con %>%
-  left_join(good_pdiffs) %>%
-  filter(abs(pdiff) < 100)
+good_con2 <- good_con %>%
+  ungroup #%>%
+  # left_join(good_pdiffs) %>%
+  # filter(abs(pdiff) < 100) %>%
 good_con2
 good_con2 %>% filter(ftype=="syn_nd", ugroup==1)
-pdiffs %>% filter(ftype=="syn_nd", ugroup==1)
+pdiffs %>% filter(ugroup==1)
 count(good_con2, ftype, ugroup) %>% filter(ftype=="syn_nd") %>% arrange(-n) %>% ht(20)
 
 
@@ -684,6 +824,45 @@ getwts <- function(df, all_constraints, good_constraints){
   df$wt1 <- unname(weights(calib_result))
   return(df)
 }
+
+df <- ccoef %>% filter(ftype=="syn_nd") %>% filter(ugroup %in% 1)
+all_constraints <- all_constraint_vals
+good_constraints <- good_con2
+
+getwtsi <- function(df, all_constraints, good_constraints, tolerances){
+  # getwtsi(., all_constraint_vals, good_con2, tolerances)
+  ftype.in <- first(df$ftype)
+  ugroup.in <- first(df$ugroup)
+  
+  convars <- good_constraints %>%
+    filter(ftype==ftype.in,
+           ugroup==ugroup.in) %>%
+    .[["good_constraint"]]
+  
+  constraints <- all_constraints %>%
+    ungroup %>%
+    filter(ftype=="puf", # IMPORTANT!
+           ugroup==ugroup.in) %>%
+    select(convars)
+  
+  print(paste0("Starting group: ", ugroup.in))
+  ipopt_result <- ipopt_reweight(df$wt0, df[, convars], constraints, tolerances, ugroup.in)
+  
+  if(ipopt_result$status != 0){
+    print(ipopt_result$message)
+    print("\n")
+    fname <- paste0("ipopt_bad_", ugroup.in, ".rds")
+    saveRDS(ipopt_result, paste0("d:/temp/", fname))
+    
+    tmp <- read_file("syntarget.out")
+    fname <- paste0("d:/temp/", "ipopt_bad_", ugroup.in, ".out")
+    write_file(tmp, fname)
+  }
+  
+  df$wt1 <- ipopt_result$solution * df$wt0
+  return(df)
+}
+
 
 calibrate_reweight <- function(weights, data, constraints){
   # id = ~0 means no clusters
@@ -720,53 +899,39 @@ calibrate_reweight <- function(weights, data, constraints){
 }
 
 
+
+combine <- function(prefix, suffix) {as.vector(t(outer(prefix, suffix, paste, sep="_")))}
+
+vars1 <- c(tcvars, "e00400", "e00600", "e00900", "e01500", "e01700")
+grp1 <- combine(vars1, c("sumpos", "sumneg", "npos", "nneg", "nz"))
+
+tolerances <- tibble(variable=all_constraint_vars, tol=.5) %>%
+  mutate(tol=case_when(variable %in% grp1 ~ .002,
+                       TRUE ~ tol))
+tolerances
+
+glimpse(ccoef)
+
+glimpse(good_con2)
+
+count(good_con2, ftype)
+
 a <- proc.time()
 opt <- ccoef %>%
   filter(ftype=="syn_nd") %>%
-  filter(ugroup %in% 1:1) %>%
+  # filter(ugroup %in% 81) %>%
   group_by(ftype, ugroup) %>%
-  do(getwts(., all_constraint_vals, good_con2)) %>%
+  do(getwtsi(., all_constraint_vals, good_con2, tolerances)) %>%
   ungroup
 b <- proc.time()
 b - a
+saveRDS(opt, "d:/temp/opt.rds")
+
+opt <- readRDS(opt, "d:/temp/opt.rds")
 glimpse(opt)
+quantile(opt$wt0)
 quantile(opt$wt1)
-# linear
-# user  system elapsed 
-# 237.60   33.90  273.47 
-# raking
-
-# logit
-(n <- max(opt$ugroup))
-getpiece <- function(ugroup){
-  fname <- paste0("calib", ugroup.in, ".rds")
-  readRDS(paste0("d:/temp/", fname))
-}
-optlist <- llply(1:1, getpiece, .progress="text")
-str(optlist[[1]])
-attributes(optlist[[1]]$postStrata[[1]]$w)$failed
-attributes(optlist[[1]]$postStrata$eta)
-
-failed <- laply(1:n, function(i) attributes(optlist[[i]]$postStrata[[1]]$w)$failed)
-
-objcomp <- tibble(i=1:length(max.obj), synpuf17=max.obj, synthpop8=my.obj)
-
-
-
-
-# check <- readRDS("d:/temp/calib.rds")
-# summary(check)
-# str(check)
-# weights(check)[1:10]
-# 315.750030 364.676601   2.490171   9.447461   2.375099 
-opt %>% filter(row_number() <=5) %>% select(ftype, ugroup, wt0, wt1) %>% as.data.frame()
-
-count(opt, ftype, ugroup)
-opt %>% select(ftype, ugroup, wt0, wt1)
-tmp <- opt %>% 
-  mutate(ratio=wt1 / wt0) 
-
-quantile(tmp$ratio)
+quantile(opt$wt1 / opt$wt0)
 
 check <- opt %>%
   select(-RECID) %>%
@@ -790,13 +955,13 @@ check %>%
          diff0=sum0 - target,
          diff1=sum1 - target) %>%
   select(cnum, everything()) %>%
-  arrange(-abs(diff1)) %>%
+  arrange(-abs(pdiff1)) %>%
   head(100) %>%
-  kable(digits=c(rep(0, 7), 1, 1, 0, 0), format.args = list(big.mark=","))
+  kable(digits=c(rep(0, 9), 1, 1, 0, 0), format.args = list(big.mark=","))
 
 check %>%
   filter(str_detect(variable, "_")) %>%
-  filter(ugroup==1) %>%
+   filter(ugroup==81) %>%
   mutate(cnum=row_number(),
          pdiff0=sum0 / target * 100 - 100,
          pdiff1=sum1 / target * 100 - 100,
@@ -805,20 +970,20 @@ check %>%
   select(cnum, everything()) %>%
   arrange(-abs(diff1)) %>%
   head(100) %>%
-  kable(digits=c(rep(0, 7), 1, 1, 0, 0), format.args = list(big.mark=","))
+  kable(digits=c(rep(0, 9), 1, 1, 0, 0), format.args = list(big.mark=","))
 
-bad <- check %>%
-  filter(str_detect(variable, "_")) %>%
-  mutate(cnum=row_number(),
-         pdiff0=sum0 / target * 100 - 100,
-         pdiff1=sum1 / target * 100 - 100,
-         diff0=sum0 - target,
-         diff1=sum1 - target) %>%
-  select(cnum, everything()) %>%
-  group_by(ugroup) %>%
-  summarise(n=n(), nbad=sum(abs(pdiff1) > 10, na.rm=TRUE))
-bad %>%
-  arrange(-nbad)
+# bad <- check %>%
+#   filter(str_detect(variable, "_")) %>%
+#   mutate(cnum=row_number(),
+#          pdiff0=sum0 / target * 100 - 100,
+#          pdiff1=sum1 / target * 100 - 100,
+#          diff0=sum0 - target,
+#          diff1=sum1 - target) %>%
+#   select(cnum, everything()) %>%
+#   group_by(ugroup) %>%
+#   summarise(n=n(), nbad=sum(abs(pdiff1) > 10, na.rm=TRUE))
+# bad %>%
+#   arrange(-nbad)
 # ugroup     n  nbad
 # <int> <int> <int>
 #   1     12   104    58
@@ -904,12 +1069,12 @@ str(tmp)
 
 
 
-#..3. Now that groups are defined, we can run dplyr to do the optimization ----
-calib_result <- calibrate_reweight(wts0, data, constraints)
-
-ffw2 %>%
-  filter(ugroup==4) %>%
-  group_by(ugroup)
+# #..3. Now that groups are defined, we can run dplyr to do the optimization ----
+# calib_result <- calibrate_reweight(wts0, data, constraints)
+# 
+# ffw2 %>%
+#   filter(ugroup==4) %>%
+#   group_by(ugroup)
 
 
 
@@ -2178,3 +2343,16 @@ opx <- optimx(x0, fn=eval_f_full_scaled, gr=eval_grad_f_full_scaled, hess=NULL,
 #   select(ftype, ugroup, all_constraint_vars) %>%
 #   do(getgoodcols(.)) %>%
 #   collect()
+(n <- max(opt$ugroup))
+getpiece <- function(ugroup){
+  fname <- paste0("calib", ugroup.in, ".rds")
+  readRDS(paste0("d:/temp/", fname))
+}
+optlist <- llply(1:1, getpiece, .progress="text")
+str(optlist[[1]])
+attributes(optlist[[1]]$postStrata[[1]]$w)$failed
+attributes(optlist[[1]]$postStrata$eta)
+
+failed <- laply(1:n, function(i) attributes(optlist[[i]]$postStrata[[1]]$w)$failed)
+
+objcomp <- tibble(i=1:length(max.obj), synpuf17=max.obj, synthpop8=my.obj)
