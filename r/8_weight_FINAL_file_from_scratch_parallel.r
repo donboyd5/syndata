@@ -1,4 +1,7 @@
+# !diagnostics off  # to get rid of errant tibble warnings about unknown column
 
+# https://github.com/tidyverse/tibble/issues/450
+# or set bad variable to NULL tbl %>% has_name("c")
 
 #****************************************************************************************************
 #                Libraries ####
@@ -74,12 +77,24 @@ Sys.setenv(
 )
 shell("echo %PATH% ", intern= TRUE)
 
+
 #****************************************************************************************************
 #                functions - general ####
 #****************************************************************************************************
 ns <- function(df) {names(df) %>% sort } # names sort 
 
+combine <- function(prefix, suffix) {as.vector(t(outer(prefix, suffix, paste, sep="_")))}
+
 flag_dups <- function(df) {duplicated(df) | duplicated(df, fromLast=TRUE)} # this gets all dups
+
+showvars <- function(sort="vname", usevars=syn_info$vname){
+  if(sort=="vname") temp <- syn_info %>% arrange(vname) else
+    if(sort=="sum") temp <- syn_info %>% arrange(-abs(sum))
+    
+    temp %>% 
+      filter(vname %in% usevars) %>%
+      kable(digits=0, format.args = list(big.mark=","))
+}
 
 
 #****************************************************************************************************
@@ -174,31 +189,33 @@ eval_g_dense <- function(x, inputs){
 #   return(hess)
 # }
 
-get_tols <- function(tolerances, constraints, default=0){
-  # default should be in 0:Inf
-  # tolerances is data frame with cols variable and tol
-  # constraints is 1-row data frame with cols for constraints
-  # row has constraint values
-  # return: named vector with a tolerance for each constraint
-  tols <- rep(default, ncol(constraints))
-  names(tols) <- names(constraints)
-  
-  var_indexes <- match(names(constraints), tolerances$variable)
-  tol_subset <- tolerances[var_indexes, ]
-  tols[tol_subset$variable] <- tol_subset$tol
-  # tols
-  return(tols)
-}
+# get_tols <- function(tolerances, constraints, default=0){
+#   # default should be in 0:Inf
+#   # tolerances is data frame with cols variable and tol
+#   # constraints is 1-row data frame with cols for constraints
+#   # row has constraint values
+#   # return: named vector with a tolerance for each constraint
+#   tols <- rep(default, ncol(constraints))
+#   names(tols) <- names(constraints)
+#   
+#   var_indexes <- match(names(constraints), tolerances$variable)
+#   tol_subset <- tolerances[var_indexes, ]
+#   tols[tol_subset$variable] <- tol_subset$tol
+#   # tols
+#   return(tols)
+# }
 # get_tols(tolerances, constraints, .01)
 
 
-calibrate_reweight <- function(weights, data, constraints, force=TRUE){
+calibrate_reweight <- function(weights, data, constraints){
   # id = ~0 means no clusters
   sdo <- svydesign(id = ~0, weights = weights, data = data)
   
   pop_totals <- constraints %>% 
     gather(vname, value) %>%
     deframe
+  
+  eps <- abs(pop_totals * .005)
   
   # pop_totals <- pop_totals[-1] # djb skipping this step
   
@@ -211,13 +228,19 @@ calibrate_reweight <- function(weights, data, constraints, force=TRUE){
                           formula=frm, 
                           population=pop_totals, 
                           calfun=fn[1], 
-                          eta=weights, 
-                          bounds=c(0,Inf),
+                          # eta=weights, 
+                          # bounds=c(-Inf,Inf),
+                          # bounds=c(0.1,Inf),
+                          bounds=c(0.00001, 1000),
+                          bounds.const=FALSE, # default FALSE
+                          # trim=c(0, Inf),
+                          epsilon=eps, # default 1e-7
                           sparse=TRUE, 
-                          force=force)
+                          force=FALSE)
   
   return(calibrated)
 }
+
 
 uni_opt <- function(method, wts0, data, constraints, objfn=NULL, ...){
   # call any of the methods and get a uniform return value
@@ -280,35 +303,52 @@ uni_opt <- function(method, wts0, data, constraints, objfn=NULL, ...){
   return(result)
 }
 
-weights <- df$wt0
-data <- df[, convars]
-constraints
-ugroup.in
 
-ipopt_reweight <- function(weights, data, constraints, tolerances, ugroup.in){
+getwts <- function(df, all_constraints, good_constraints){
+  ftype.in <- first(df$ftype)
+  ugroup.in <- first(df$ugroup)
+  
+  convars <- good_constraints %>%
+    filter(ftype==ftype.in,
+           ugroup==ugroup.in) %>%
+    .[["good_constraint"]]
+  
+  constraints <- all_constraints %>%
+    ungroup %>%
+    filter(ftype=="puf", # IMPORTANT!
+           ugroup==ugroup.in) %>%
+    select(convars)
+  
+  calib_result <- calibrate_reweight(df$wt0, df[, convars], constraints)
+  
+  fname <- paste0("calib", ugroup.in, ".rds")
+  saveRDS(calib_result, paste0("d:/temp/", fname))
+  df$wt1 <- unname(weights(calib_result))
+  return(df)
+}
+
+
+
+#****************************************************************************************************
+#                Ipopt functions ####
+#****************************************************************************************************
+ipopt_reweight <- function(weights, data, constraint_df, ugroup.in){
   # arguments for all functions passed to ipoptr must be x, inputs
   inputs <- list()
   inputs$p <- 2
   inputs$wt <- weights
   inputs$data <- data
-  inputs$constraint_vars <- names(constraints)
-  inputs$cc_dense <- c(as.matrix(data[, names(constraints)] * weights)) # flattens the cc matrix
+  inputs$constraint_vars <- names(constraint_df %>% select(-variable))
+  inputs$cc_dense <- c(as.matrix(data[, inputs$constraint_vars] * weights)) # flattens the cc matrix
   
   xlb <- rep(0, nrow(data))
   xub <- rep(1000, nrow(data))
   x0 <- rep(1, nrow(data))
   
-  # if(is.null(tolerances)) {
-  #   tolerances <- tribble(
-  #     ~variable, ~tol,
-  #     "c00100", .001
-  #   )
-  # }
+  constraints <- constraint_df %>% filter(variable=="constraint") %>% select(-variable) # do I need this??
   
-  tol <- get_tols(tolerances, constraints, default=.01)
-  cvec <- t(constraints[1, ]) %>% as.vector
-  clb <- (cvec - tol * abs(cvec)) %>% unname
-  cub <- cvec + tol * abs(cvec)
+  clb <- constraint_df %>% filter(variable=="clb") %>% select(-variable) %>% t %>% as.vector
+  cub <- constraint_df %>% filter(variable=="cub") %>% select(-variable) %>% t %>% as.vector
   
   eval_jac_g_structure_dense <- define_jac_g_structure_dense(
     n_constraints=ncol(data[, names(constraints)]), 
@@ -316,10 +356,13 @@ ipopt_reweight <- function(weights, data, constraints, tolerances, ugroup.in){
   
   eval_h_structure <- lapply(1:length(inputs$wt), function(x) x) # diagonal elements of our Hessian
   
+  # ma86 was faster in one test I did
   opts <- list("print_level" = 0,
                "file_print_level" = 5, # integer
-               "linear_solver" = "ma57", # mumps pardiso ma27 ma57 ma77 ma86 ma97
+               "linear_solver" = "ma86", # mumps pardiso ma27 ma57 ma77 ma86 ma97
                "max_iter"=200,
+               "nlp_scaling_max_gradient" = 1e-3, # 10 improved things -- default 100
+               "obj_scaling_factor" = 1, # default 1
                # "derivative_test"="first-order",
                # "derivative_test_print_all"="yes",
                "output_file" = "syntarget.out")
@@ -343,21 +386,51 @@ ipopt_reweight <- function(weights, data, constraints, tolerances, ugroup.in){
 }
 
 
+getwts_ipopt <- function(df, all_constraints, bounds){
+  # get weights using ipoptr
+  ftype.in <- first(df$ftype)
+  ugroup.in <- first(df$ugroup)
+  
+  # create a 3-record data frame from bounds, of constraints, clb, and cub
+  # so that all are in exactly the same order
+  constraint_df <- bounds %>%
+    filter(ftype==ftype.in, ugroup==ugroup.in)%>%
+    select(good_constraint, constraint=target, clb, cub) %>%
+    gather(variable, value, -good_constraint) %>%
+    spread(good_constraint, value)
+  convars <- names(constraint_df %>% select(-variable))
+  
+  print(paste0("Starting group: ", ugroup.in))
+  ipopt_result <- ipopt_reweight(df$wt0, df[, convars], constraint_df, ugroup.in)
+  
+  if(ipopt_result$status != 0){
+    print(ipopt_result$message)
+    print("\n")
+    fname <- paste0("ipopt_bad_", ugroup.in, ".rds")
+    saveRDS(ipopt_result, paste0("d:/temp/", fname))
+    
+    tmp <- read_file("syntarget.out")
+    fname <- paste0("d:/temp/", "ipopt_bad_", ugroup.in, ".out")
+    write_file(tmp, fname)
+  }
+  
+  df$wt1 <- ipopt_result$solution * df$wt0
+  return(df)
+}
 
-#****************************************************************************************************
-#                Ipopt functions ####
-#****************************************************************************************************
 
 
-#****************************************************************************************************
-#                Get puf variable names ####
-#****************************************************************************************************
-puf.vnames <- get_puf_vnames()
 
 
 #****************************************************************************************************
 #                get the puf, syn, and syn-nodups file ####
 #****************************************************************************************************
+syn_info <- readRDS("./data/syn_info.rds")
+
+
+showvars()
+showvars("sum")
+
 syn <- read_csv(paste0(synd, synrf_fn))
 glimpse(syn)
 ns(syn) # we have RECID and S006 on this file
@@ -372,6 +445,47 @@ puf2 <- puf[, names(syn)] %>% filter(MARS!=0) # this is the one we'll use
 
 identical(names(syn), names(puf2))
 identical(names(syn_nd), names(puf2))
+
+
+#****************************************************************************************************
+#                define disclosure-review variables, save with descriptions and puf sums ####
+#****************************************************************************************************
+# df1 <- read_csv(paste0(synd, synrfnd_fn), n_max=0)
+# glimpse(df1)
+# ns(df1)
+nodup_vars <- setdiff(names(syn_nd), c("RECID", "S006"))
+nodup_vars # 64 variables
+
+puf_vnames <- get_puf_vnames() %>% select(vname, vdesc)
+tc_vnames <- tribble(
+  ~vname, ~vdesc,
+  "c17000", "Sch A: Medical expenses deducted (calculated)",
+  "c18300", "Sch A: State and local taxes deducted (calculated)",
+  "c21060", "Itemized deductions before phase-out (zero for non-itemizers) (calculated)",
+  "standard", "standard Standard deduction (zero for itemizers) (calculated)",
+  "c04800", "Regular taxable income (calculated)",
+  "taxbc", "regular tax before credits (calculated)",
+  "c09600", "Alternative Minimum Tax (AMT) liability (calculated)",
+  "c05800", "taxbc plus AMT liability (calculated)"
+  )
+var_vnames <- bind_rows(puf_vnames, tc_vnames)
+
+
+f <- function(x, wt) sum(x * wt / 100)
+syn_info <- puf2 %>%
+  select(nodup_vars, S006) %>%
+  summarise_at(vars(-S006), list(~f(., S006))) %>%
+  gather(vname, sum) %>%
+  left_join(puf_vnames %>% 
+              mutate(vname=str_to_upper(vname)) %>% 
+              group_by(vname) %>%
+              filter(row_number()==1) %>%
+              ungroup %>%
+              select(vname, vdesc))
+saveRDS(syn_info, "./data/syn_info.rds")
+
+
+
 
 
 #****************************************************************************************************
@@ -469,131 +583,6 @@ ffw %>%
             c00100_b=sum(c00100 * wt0) / 1e9,
             taxbc_b=sum(taxbc * wt0) / 1e9) %>%
   as.data.frame
-
-
-#****************************************************************************************************
-#               try my new weighting approach ####
-#****************************************************************************************************
-count(ffw, MARS)
-ns(ffw)
-
-# prepare sample data
-samp <- ffw %>%
-  filter(c00100 >= 1e3, c00100 <= 5e3, MARS==1)
-count(samp, ftype)
-
-# now calculate constraints
-
-
-#.. define vars ----
-# cbasevars <- c("n", "pop", "c00100", "taxbc", "e00200", "e00300") #, "e00400")
-# cbasevars <- c("pop", "c00100", "taxbc", "e00200", "e00300") #, "e00400")
-# cbasevars <- c("c00100", "taxbc", "e00200", "e00300") #, "e00400")
-
-tcvars <- c("c00100", "taxbc", "c09600", "c05800")
-priority1 <- c("e00200", "e00300", "e00400", "e00600", "e00650",
-               "e00900", "e01500", "e01700")
-priority2 <- c("e02400", "e02000", 
-               "e26270", "e19200", "p23250", "e18400", "e01400")
-priority3 <- c("e18500", "e19800", "e17500", "e20400", "e02300",
-               "e20100", "e00700")
-# `e02500`, `e59560` and `e24516` no in our data
-cbasevars <- c(tcvars, priority1, priority2, priority3)
-cbasevars <- c(tcvars)
-
-# extended sample
-sampx <- samp %>%
-  select(ftype, RECID, wt0, cbasevars) %>%
-  mutate_at(vars(cbasevars), list(npos = ~npos(., wt0),
-                                  nneg = ~nneg(., wt0),
-                                  nnz = ~nnz(., wt0),
-                                  sumpos = ~sumpos(., wt0),
-                                  sumneg = ~sumneg(., wt0)))
-# ,nneg = ~nneg(., wt0))            
-glimpse(sampx)
-
-data <- sampx %>%
-  filter(ftype=="syn_nd") %>%
-  select(ftype, RECID, wt0, contains("_n"), contains("_sum"))
-glimpse(data)
-
-system.time(dupcols <- which(duplicated(as.matrix(data), MARGIN = 2)))
-dupcols
-ns(dupcols)
-data <- data[, -dupcols]
-
-constraint_vals <- sampx %>%
-  group_by(ftype) %>%
-  summarise_at(vars(contains("_n"), contains("_sum")),
-               list(~ sum(. * wt0))) %>%
-  ungroup
-constraint_vals
-
-# identify bad constraints
-constraints_all <- constraint_vals %>%
-  filter(ftype=="puf") %>%
-  select(-ftype)
-
-tmp <- pdiff(data$wt0, data, constraints_all %>% select(one_of(names(data))))
-t(tmp[1, ])
-good_constraints <- names(tmp)[which(!is.na(tmp[1, ]))]
-good_constraints %>% sort
-
-constraints <- constraint_vals %>%
-  filter(ftype=="puf") %>%
-  select(good_constraints)
-
-t(constraints)
-
-df_pdiff <- pdiff(data$wt0, data, constraints)
-t(df_pdiff)
-# calc_constraints(data$wt0, data, good_constraints)
-# pct difference from constraint targets at a few possible starting points
-pdiff(data$wt0, data, constraints) %>% round(2)
-
-tmp <- uni_opt(data$wt0, data, constraints, method="calibrate", objfn=objfn, maxiter=10)
-str(tmp)
-
-d3 <- bind_rows(sampx %>% filter(ftype!="syn_nd") %>% mutate(wt1=wt0),
-                sampx %>%
-                  filter(ftype=="syn_nd") %>%
-                  mutate(wt1=tmp$weights))
-
-glimpse(d3)
-
-bsum <- function(x, wt) sum(x * wt) / 1e9
-wsum <- function(x, wt) sum(x * wt)
-d3 %>%
-  group_by(ftype) %>%
-  # mutate(wt1=wt0) %>%
-  summarise(wt0sum=sum(wt0),
-            wt1sum=sum(wt1),
-            c00100=bsum(c00100, wt1),
-            c05800=bsum(c05800, wt1),
-            e00200=bsum(e00200, wt1),
-            e01500=bsum(e01500, wt1),
-            e01700=bsum(e01700, wt1),
-            p23250=bsum(p23250, wt1),
-            e19800=bsum(e19800, wt1),
-            p23250_nneg=wsum(p23250_nneg, wt1),
-            e00900_nneg=wsum(e00900_nneg, wt1)) %>%
-  data.frame
-
-d3 %>%
-  filter(ftype=="syn_nd") %>%
-  mutate(ratio=wt1 / wt0) %>%
-  do(qtiledf(.$ratio, probs=c(0, .01, .05, .1, .25, .5, .75, .9, .95, .99, 1)))
-
-d3 %>%
-  filter(ftype=="syn_nd") %>%
-  do(qtiledf(.$wt1, probs=c(0, .01, .05, .1, .25, .5, .75, .9, .95, .99, 1)))
-
-d3 %>%
-  filter(ftype=="syn_nd", wt1 < 2) %>%
-  do(qtiledf(.$wt1, probs=c(0, .01, .05, .1, .25, .5, .75, .9, .95, .99, 1)))
-
-
-# if needed, change calibrate option epsilon -- default is 1e-7
 
 
 #****************************************************************************************************
@@ -700,28 +689,26 @@ ffw2 <- ffw %>%
 b <- proc.time()
 b - a # 18 secs
 
-# check
-# check <- ffw2 %>%
-#   select(ftype, MARS, c00100, ugroup) %>%
-#   group_by(ftype, ugroup) %>%
-#   sample_n(3) %>%
-#   ungroup %>%
-#   arrange(ftype, ugroup, c00100)
-# check %>% filter(ftype=="puf")
-# looks good
-
 #..2. Now that groups are defined, get constraints for each group ----
+# get size-ordered list of vnames
+(size_vars <- syn_info %>%
+    mutate(vname=change_case(vname)) %>%
+    arrange(-abs(sum)) %>% .[["vname"]])
+showvars("sum")
+
+#.. define variable groupings ----
+pcatvars <- c("XTOT", "DSI", "EIC", "FDED", "MIDR", "n24", "f6251", "f2441") # don't include MARS as it is used for grouping
+(continuous_vars <- setdiff(size_vars, c(pcatvars, "MARS")))
 tcvars <- c("c00100", "taxbc", "c09600", "c05800")
-priority1 <- c("e00200", "e00300", "e00400", "e00600", "e00650",
-               "e00900", "e01500", "e01700")
-priority2 <- c("e02400", "e02000", 
-               "e26270", "e19200", "p23250", "e18400", "e01400")
-priority3 <- c("e18500", "e19800", "e17500", "e20400", "e02300",
-               "e20100", "e00700")
-# `e02500`, `e59560` and `e24516` no in our data
-# cbasevars <- c(tcvars, priority1, priority2, priority3)
-cbasevars <- c(tcvars, priority1)
-# cbasevars <- c(tcvars)
+# priority levels
+p1 <- continuous_vars[1:10]
+p2 <- continuous_vars[11:20]
+p3 <- continuous_vars[21:30]
+p4 <- continuous_vars[31:40]
+p5 <- continuous_vars[41:50]
+p6 <- continuous_vars[51:length(continuous_vars)]
+cbasevars <- c(tcvars, p1, p2, p3, p4, p5, p6)
+#.. end define variable groupings ----
 
 # get constraint coefficients
 ccoef <- ffw2 %>%
@@ -731,11 +718,11 @@ ccoef <- ffw2 %>%
                                   nz = ~nneg(., wt0),
                                   sumpos = ~sumpos(., wt0),
                                   sumneg = ~sumneg(., wt0)))
-glimpse(ccoef)
+glimpse(ccoef) # 228 constraints plus ftype and ugroup
 
 all_constraint_vars <- ccoef %>%
   select(contains("_n"), contains("_sum")) %>%
-  names(.)
+  names(.) # length 228
 
 a <- proc.time()
 all_constraint_vals <- ccoef %>%
@@ -745,17 +732,20 @@ all_constraint_vals <- ccoef %>%
        enframe %>%
        spread(name, value))
 b <- proc.time()
-b - a # 10 secs
-glimpse(all_constraint_vals)
+b - a # about a min
+glimpse(all_constraint_vals) # 228 constraints plus ftype ugroup; 246 obs (3 ftypes x 82 groups)
 
-fdiff <- function(x, puf) x - puf
-fpdiff <- function(x, puf) fdiff(x, puf) / puf * 100
-pdiffs <- all_constraint_vals %>%
-  gather(variable, value, -ftype, -ugroup) %>%
-  spread(ftype, value) %>%
-  mutate_at(vars(syn, syn_nd),
-            list(diff = ~fdiff(., puf),
-                 pdiff= ~fpdiff(., puf)))
+
+# fdiff <- function(x, puf) x - puf
+# fpdiff <- function(x, puf) fdiff(x, puf) / puf * 100
+# pdiffs <- all_constraint_vals %>%
+#   gather(variable, value, -ftype, -ugroup) %>%
+#   spread(ftype, value) %>%
+#   mutate_at(vars(syn, syn_nd),
+#             list(diff = ~fdiff(., puf),
+#                  pdiff= ~fpdiff(., puf)))
+# glimpse(pdiffs) # 82 groups
+# length(unique(pdiffs$variable)) # length 228
 
 # now find good constraints for each group, within each non-puf ftype:
 # a) drop constraints where 
@@ -773,236 +763,216 @@ good_con <- ccoef %>%
   filter(ftype != "puf") %>%
   # filter(ugroup %in% 1:2) %>%
   group_by(ftype, ugroup) %>%
-  do(getgoodcols(.[,all_constraint_vars]))
+  do(getgoodcols(.[, all_constraint_vars]))
 b <- proc.time()
 b - a # only 13 secs
 glimpse(good_con)
+length(unique(good_con$good_constraint)) # only 132 good constraints
 count(good_con, ftype, ugroup)
 
-# get good pdiffs
-good_pdiffs <- pdiffs %>%
-  select(ugroup, good_constraint=variable, contains("pdiff")) %>%
-  gather(ftype, pdiff, -ugroup, -good_constraint) %>%
-  mutate(ftype=str_remove(ftype, "_pdiff")) %>%
-  filter(!is.na(pdiff))
+# get sums within groups of constraint coefficients to help with setting tolerances
+# str_extract(all_constraint_vars, "[^_]+")
+
+ccsums <- all_constraint_vals %>%
+  gather(constraint_var, file_value, -ftype, -ugroup) %>%
+  group_by(ugroup, constraint_var) %>%
+  mutate(target=file_value[ftype=="puf"],
+         diff=file_value - target,
+         pdiff=diff / target * 100) %>%
+  left_join(group_agibreaks %>% select(ugroup, agilow_ge, agihigh_lt)) %>%
+  select(ugroup, constraint_var, agilow_ge, agihigh_lt, ftype, target, file_value, diff, pdiff) %>%
+  mutate(vdesc=var_vnames$vdesc[match(str_extract(constraint_var, "[^_]+"), var_vnames$vname)]) %>%
+  ungroup
+glimpse(ccsums)
+ccsums %>% filter(ugroup==3, ftype=="syn_nd")
+# ,nnz_puf=sum(file_value[ftype=="puf"]!=0
+# ccsums <- pdiffs %>%
+#   group_by(ugroup, variable) %>%
+#   summarise_at(vars(puf, syn, syn_nd, syn_diff, syn_nd_diff), ~sum(.))
+
 
 # combine them
-good_con2 <- good_con %>%
-  ungroup #%>%
+targets <- ccsums %>% 
+  rename(good_constraint=constraint_var) %>%
+  right_join(good_con, by=c("ftype", "ugroup", "good_constraint"))
   # left_join(good_pdiffs) %>%
   # filter(abs(pdiff) < 100) %>%
-good_con2
-good_con2 %>% filter(ftype=="syn_nd", ugroup==1)
-pdiffs %>% filter(ugroup==1)
-count(good_con2, ftype, ugroup) %>% filter(ftype=="syn_nd") %>% arrange(-n) %>% ht(20)
+targets
+targets %>% filter(ftype=="syn_nd", ugroup==3)
+targets %>% filter(ftype=="syn_nd", target==0, file_value!=0) # 825 in the entire file
+targets %>% filter(ftype=="syn_nd", target==!0, file_value==0) # none in the file
 
 
-#.3. Run the optimization ----
-glimpse(all_constraint_vars)
-glimpse(ccoef)
+#.3. Prepare the constraint bounds ----
+# look at priority groupings
+showvars(usevars=str_to_upper(p1))
+showvars(usevars=str_to_upper(p2))
+showvars(usevars=str_to_upper(p3))
+showvars(usevars=str_to_upper(p4))
+showvars(usevars=str_to_upper(p5))
+showvars(usevars=str_to_upper(p6))
 
+# e09800 e58990 e03400 e07240 p08000 e07600 e24518
+# create priority groupings and assign tolerances
 
-getwts <- function(df, all_constraints, good_constraints){
-  ftype.in <- first(df$ftype)
-  ugroup.in <- first(df$ugroup)
-  
-  convars <- good_constraints %>%
-    filter(ftype==ftype.in,
-           ugroup==ugroup.in) %>%
-    .[["good_constraint"]]
-
-  constraints <- all_constraints %>%
-    ungroup %>%
-    filter(ftype=="puf", # IMPORTANT!
-           ugroup==ugroup.in) %>%
-    select(convars)
-  
-  calib_result <- calibrate_reweight(df$wt0, df[, convars], constraints)
-  
-  fname <- paste0("calib", ugroup.in, ".rds")
-  saveRDS(calib_result, paste0("d:/temp/", fname))
-  df$wt1 <- unname(weights(calib_result))
-  return(df)
-}
-
-df <- ccoef %>% filter(ftype=="syn_nd") %>% filter(ugroup %in% 1)
-all_constraints <- all_constraint_vals
-good_constraints <- good_con2
-
-getwtsi <- function(df, all_constraints, good_constraints, tolerances){
-  # getwtsi(., all_constraint_vals, good_con2, tolerances)
-  ftype.in <- first(df$ftype)
-  ugroup.in <- first(df$ugroup)
-  
-  convars <- good_constraints %>%
-    filter(ftype==ftype.in,
-           ugroup==ugroup.in) %>%
-    .[["good_constraint"]]
-  
-  constraints <- all_constraints %>%
-    ungroup %>%
-    filter(ftype=="puf", # IMPORTANT!
-           ugroup==ugroup.in) %>%
-    select(convars)
-  
-  print(paste0("Starting group: ", ugroup.in))
-  ipopt_result <- ipopt_reweight(df$wt0, df[, convars], constraints, tolerances, ugroup.in)
-  
-  if(ipopt_result$status != 0){
-    print(ipopt_result$message)
-    print("\n")
-    fname <- paste0("ipopt_bad_", ugroup.in, ".rds")
-    saveRDS(ipopt_result, paste0("d:/temp/", fname))
-    
-    tmp <- read_file("syntarget.out")
-    fname <- paste0("d:/temp/", "ipopt_bad_", ugroup.in, ".out")
-    write_file(tmp, fname)
-  }
-  
-  df$wt1 <- ipopt_result$solution * df$wt0
-  return(df)
-}
-
-
-calibrate_reweight <- function(weights, data, constraints){
-  # id = ~0 means no clusters
-  sdo <- svydesign(id = ~0, weights = weights, data = data)
-  
-  pop_totals <- constraints %>% 
-    gather(vname, value) %>%
-    deframe
-  
-  eps <- abs(pop_totals * .005)
-  
-  # pop_totals <- pop_totals[-1] # djb skipping this step
-  
-  frm_string <- paste0("~ ", paste(names(pop_totals), collapse=" + "), " - 1")
-  frm <- as.formula(frm_string)
-  
-  # note that logit calibration requires finite bounds
-  fn <- c("linear","raking","logit")
-  calibrated <- calibrate(sdo, 
-                          formula=frm, 
-                          population=pop_totals, 
-                          calfun=fn[1], 
-                          # eta=weights, 
-                          # bounds=c(-Inf,Inf),
-                          # bounds=c(0.1,Inf),
-                          bounds=c(0.00001, 1000),
-                          bounds.const=FALSE, # default FALSE
-                          # trim=c(0, Inf),
-                          epsilon=eps, # default 1e-7
-                          sparse=TRUE, 
-                          force=FALSE)
-  
-  return(calibrated)
-}
-
-
-
-combine <- function(prefix, suffix) {as.vector(t(outer(prefix, suffix, paste, sep="_")))}
-
-vars1 <- c(tcvars, "e00400", "e00600", "e00900", "e01500", "e01700")
-grp1 <- combine(vars1, c("sumpos", "sumneg", "npos", "nneg", "nz"))
-
-tolerances <- tibble(variable=all_constraint_vars, tol=.5) %>%
-  mutate(tol=case_when(variable %in% grp1 ~ .002,
-                       TRUE ~ tol))
+tolerances <- tibble(vname=unique(str_extract(all_constraint_vars, "[^_]+"))) %>%
+  left_join(syn_info %>% mutate(vname=change_case(vname))) %>%
+  mutate(sum=case_when(vname=="c00100" ~ 1e20,
+                       vname=="taxbc"  ~ 1e19,
+                       TRUE ~ sum)) %>%
+  arrange(-abs(sum)) %>%
+  mutate(rank=row_number(),
+         # establish default tolerances
+         tol=case_when(rank %in% 1:10 ~ .001,
+                       rank %in% 11:22 ~ .05,
+                       rank %in% 23:40 ~ .25,
+                       TRUE ~ Inf),
+         # zero_frac is the max fraction of the value to keep if target is zero
+         zero_frac=case_when(rank %in% 1:10 ~ .2,
+                       rank %in% 11:22 ~ .4,
+                       rank %in% 23:40 ~ .6,
+                       TRUE ~ Inf))
 tolerances
+vars <- c("e58990", "e03400", "p08000", "e07240", "e07600", "e24518")
+tolerances %>% filter(vname %in% vars)
 
-glimpse(ccoef)
+# tolerances <- tibble(variable=all_constraint_vars) %>%
+#   mutate(tol=case_when(variable %in% grp1 ~ .001,
+#                        variable %in% grp2 ~ .05,
+#                        variable %in% grp3 ~ .25,
+#                        variable %in% grp4 ~ .5,
+#                        variable %in% grp5 ~ .9,
+#                        TRUE ~ 1.5),
+#          # zero_frac is the max fraction of the value to keep if target is zero
+#          zero_frac=case_when(variable %in% grp1 ~ .3,
+#                              variable %in% grp2 ~ .4,
+#                              variable %in% grp3 ~ .5,
+#                              variable %in% grp4 ~ .6,
+#                              variable %in% grp5 ~ .7,
+#                              TRUE ~ .8),
+#          zero_frac=1)
+# tolerances
 
-glimpse(good_con2)
+bounds <- targets %>%
+  mutate(vname=str_extract(good_constraint, "[^_]+")) %>%
+  left_join(tolerances %>% select(vname, rank, tol, zero_frac)) %>%
+  mutate(clb=ifelse(target==0, -zero_frac * abs(diff), target - tol * abs(target)),
+         cub=ifelse(target==0, +zero_frac * abs(diff), target + tol * abs(target))) %>%
+  # ensure that logical inconsistencies cannot occur
+  # .. counts cannot be negative, and sumpos cannot be negative
+  mutate(clb=ifelse(str_detect(good_constraint, "_n") & (clb < 0), 0, clb),
+         cub=ifelse(str_detect(good_constraint, "_n") & (cub < 0), 0, cub),
+         clb=ifelse(str_detect(good_constraint, "_sumpos") & (clb < 0), 0, clb),
+         cub=ifelse(str_detect(good_constraint, "_sumneg") & (cub > 0), 0, cub)) %>%
+  select(-vdesc, everything(), vdesc)
+bounds
+bounds %>% filter(good_constraint=="taxbc_npos", ftype=="syn_nd", ugroup==7)
+bounds %>% filter(ftype=="syn_nd", ugroup==7) %>% print(n = Inf)
 
-count(good_con2, ftype)
 
+#.4. Run the optimization ----
 a <- proc.time()
 opt <- ccoef %>%
   filter(ftype=="syn_nd") %>%
-  # filter(ugroup %in% 81) %>%
+  # filter(ugroup %in% 1:5) %>%
   group_by(ftype, ugroup) %>%
-  do(getwtsi(., all_constraint_vals, good_con2, tolerances)) %>%
+  do(getwts_ipopt(., all_constraint_vals, bounds)) %>%
   ungroup
 b <- proc.time()
 b - a
+
 saveRDS(opt, "d:/temp/opt.rds")
 
-opt <- readRDS(opt, "d:/temp/opt.rds")
-glimpse(opt)
-quantile(opt$wt0)
-quantile(opt$wt1)
-quantile(opt$wt1 / opt$wt0)
+opt <- readRDS("d:/temp/opt.rds")
+# glimpse(opt)
+probs <- c(0, .01, .05, .1, .25, .5, .75, .9, .95, .99, 1)
+quantile(opt$wt0, probs) %>% round(2)
+quantile(opt$wt1, probs) %>% round(2)
+quantile(opt$wt1 / opt$wt0, probs) %>% round(2)
 
-check <- opt %>%
-  select(-RECID) %>%
+tol <- .01
+check <-  opt %>%
+  # filter(ugroup==1) %>%
+  select(ftype, MARS, ugroup, wt0, wt1, contains("_n"), contains("_sum")) %>%
   gather(variable, value, -ftype, -MARS, -ugroup, -wt0, -wt1) %>%
   group_by(ftype, MARS, ugroup, variable) %>%
   summarise(sum0=sum(value * wt0), sum1=sum(value * wt1)) %>%
-  left_join(all_constraint_vals %>%
-              ungroup %>%
-              filter(ftype=="puf") %>%
-              select(-ftype) %>%
-              gather(variable, target, -ugroup)) %>%
-  left_join(good_con2 %>% ungroup %>% filter(ftype=="syn_nd") %>% select(ugroup, variable=good_constraint) %>% mutate(good=TRUE)) %>%
-  select(ftype, MARS, ugroup, variable, good, sum0, target, sum1)
-glimpse(check)
+  ungroup %>%
+  left_join(bounds %>%
+              filter(ftype=="syn_nd") %>% 
+              select(ugroup, variable=good_constraint, target, clb, cub, vdesc) %>% 
+              mutate(range=cub - target)) %>%
+  mutate(cnum=row_number(),
+         pdiff0=sum0 / target * 100 - 100,
+         pdiff1=sum1 / target * 100 - 100,
+         diff0=sum0 - target,
+         diff1=sum1 - target,
+         viol=!(sum1>=(clb-abs(clb*tol)) & sum1<=(cub+abs(cub*tol)))) %>%
+  select(ftype, MARS, ugroup, variable, sum0, target, clb, sum1, cub, range, diff1, pdiff1, vdesc)
+check
+
+# tol <- .001
+# check <- check %>%
+#   mutate(viol=!(sum1>=(clb-abs(clb*tol)) & sum1<=(cub+abs(cub*tol)))) %>%
+#   select(ftype, MARS, ugroup, variable, sum0, target, clb, sum1, cub, good, viol, diff1, pdiff1, vdesc)
+# glimpse(check)
+# glimpse(bounds)
+
+check %>%
+  filter(is.infinite(pdiff1) | (abs(pdiff1)>50)) %>%
+  group_by(variable, vdesc) %>%
+  summarise(n=n()) %>%
+  arrange(-n)
 
 check %>%
   filter(str_detect(variable, "_")) %>%
+  # filter(ugroup==1) %>%
+  filter(target!=0) %>%
+  # pick one of the sorts
+  arrange(-abs(diff1)) %>%
+  # arrange(-abs(pdiff1)) %>%
+  head(300) %>%
+  mutate(vdesc=str_sub(vdesc, end=25)) %>%
+  kable(digits=c(rep(0, 11), 1, 0), format.args = list(big.mark=","))
+
+check %>%
+  filter(str_detect(variable, "_")) %>%
+  group_by(ftype, variable, vdesc) %>%
+  summarise_at(vars(sum0, target, clb, sum1, cub), ~sum(.)) %>%
+  mutate(diff0=sum0 - target,
+         diff1=sum1 - target,
+         pdiff0=sum0 / target * 100 - 100,
+         pdiff1=sum1 / target * 100 - 100) %>%
+  # pick one of the sorts
+  arrange(-abs(diff1)) %>%
+  # arrange(-abs(pdiff1)) %>%
+  head(300) %>%
+  mutate(vdesc=str_sub(vdesc, end=25)) %>%
+  select(-diff0, -pdiff0) %>%
+  kable(digits=c(rep(0, 9), 1), format.args = list(big.mark=","))
+
+
+# find constraints where every puf is zero so target is zero but we have nonzero syn records -- 
+
+
+check %>%
+  filter(str_detect(variable, "_")) %>%
+  filter(ugroup==7) %>%
   mutate(cnum=row_number(),
          pdiff0=sum0 / target * 100 - 100,
          pdiff1=sum1 / target * 100 - 100,
          diff0=sum0 - target,
          diff1=sum1 - target) %>%
-  select(cnum, everything()) %>%
-  arrange(-abs(pdiff1)) %>%
-  head(100) %>%
-  kable(digits=c(rep(0, 9), 1, 1, 0, 0), format.args = list(big.mark=","))
-
-check %>%
-  filter(str_detect(variable, "_")) %>%
-   filter(ugroup==81) %>%
-  mutate(cnum=row_number(),
-         pdiff0=sum0 / target * 100 - 100,
-         pdiff1=sum1 / target * 100 - 100,
-         diff0=sum0 - target,
-         diff1=sum1 - target) %>%
-  select(cnum, everything()) %>%
+  select(-vdesc, cnum, everything(), vdesc) %>%
   arrange(-abs(diff1)) %>%
   head(100) %>%
-  kable(digits=c(rep(0, 9), 1, 1, 0, 0), format.args = list(big.mark=","))
+  mutate(vdesc=str_sub(vdesc, end=25)) %>%
+  kable(digits=c(rep(0, 9), 1, 1, 0, 0, 0), format.args = list(big.mark=","))
 
-# bad <- check %>%
-#   filter(str_detect(variable, "_")) %>%
-#   mutate(cnum=row_number(),
-#          pdiff0=sum0 / target * 100 - 100,
-#          pdiff1=sum1 / target * 100 - 100,
-#          diff0=sum0 - target,
-#          diff1=sum1 - target) %>%
-#   select(cnum, everything()) %>%
-#   group_by(ugroup) %>%
-#   summarise(n=n(), nbad=sum(abs(pdiff1) > 10, na.rm=TRUE))
-# bad %>%
-#   arrange(-nbad)
-# ugroup     n  nbad
-# <int> <int> <int>
-#   1     12   104    58
-# 2     56   104    19
-# 3    144   104    18
-# 4     55   104    16
-# 5    147   104    13
-# 6    133   104     7
-# 7    142   104     7
-# 8    143   104     7
-# 9    148   104     7
-# 10     54   104     6
-# 11    134   104     6
-# 12    136   104     6
 
-# E20100 Other than cash contributions
-# E26270 Combined partnership and S corporation net income/loss (+/-)
-# E19200 Total interest paid deduction
-
+#****************************************************************************************************
+#               TEST:  parallelization ####
+#****************************************************************************************************
 # devtools::install_github("tidyverse/multidplyr")
 # library("multidplyr")
 # cluster <- new_cluster(4)
@@ -1017,1342 +987,22 @@ check %>%
 #   do(getgoodcols(.)) %>%
 #   collect()
 
-calc_constraints(tmp$wt0, tmp, all_constraint_vars) %>%
-  enframe %>%
-  spread(name, value)
-
-tmp %>%
-  do(calc_constraints(.$wt0, ., all_constraint_vars) %>% 
-       enframe %>%
-       spread(name, value))
-
-all_data <- ccoef %>%
-  select(ftype, RECID, MARS, ugroup, wt0, all_constraint_vars)
-glimpse(data)
-
-system.time(dupcols <- which(duplicated(as.matrix(data %>% filter(ugroup==4)), MARGIN = 2)))
-dupcols
-ns(dupcols)
-data <- data[, -dupcols]
-
-constraint_vals <- sampx %>%
-  group_by(ftype) %>%
-  summarise_at(vars(contains("_n"), contains("_sum")),
-               list(~ sum(. * wt0))) %>%
-  ungroup
-constraint_vals
-
-# identify bad constraints
-constraints_all <- constraint_vals %>%
-  filter(ftype=="puf") %>%
-  select(-ftype)
-
-tmp <- pdiff(data$wt0, data, constraints_all %>% select(one_of(names(data))))
-t(tmp[1, ])
-good_constraints <- names(tmp)[which(!is.na(tmp[1, ]))]
-good_constraints %>% sort
-
-constraints <- constraint_vals %>%
-  filter(ftype=="puf") %>%
-  select(good_constraints)
-
-t(constraints)
-
-df_pdiff <- pdiff(data$wt0, data, constraints)
-t(df_pdiff)
-# calc_constraints(data$wt0, data, good_constraints)
-# pct difference from constraint targets at a few possible starting points
-pdiff(data$wt0, data, constraints) %>% round(2)
-
-tmp <- uni_opt(data$wt0, data, constraints, method="calibrate", objfn=objfn, maxiter=10)
-str(tmp)
-
-
-
-# #..3. Now that groups are defined, we can run dplyr to do the optimization ----
-# calib_result <- calibrate_reweight(wts0, data, constraints)
-# 
-# ffw2 %>%
-#   filter(ugroup==4) %>%
-#   group_by(ugroup)
-
-
-
-#****************************************************************************************************
-#                OLD ####
-#****************************************************************************************************
-library("scales")
-library("hms") # hms, for times.
-library("lubridate") # lubridate, for date/times.
-library("haven") # haven, for SPSS, SAS and Stata files.
-library("vctrs")
-library("precis")
-
-library("tibbletime") # https://business-science.github.io/tibbletime/
-
-library("grDevices")
-library("knitr")
-
-library("zoo") # for rollapply
-
-# devtools::install_github("donboyd5/btools")
-library("btools") # library that I created (install from github)
-
-library("ipoptr")
-library("nloptr")
-
-# library("synthpop") # note: masks select in dplyr
-
-
-
-# source("./r/includes/functions_target_setup_and_analysis.r")
-# source("./r/includes/functions_ipopt.r")
-
-
-#******************************************************************************************************************
-#  TEST: Get previously-prepared synfile-PUF and tax output, merge, and separate PUF and synfile ####
-#******************************************************************************************************************
-
-
-#.. Get the data and test ----
-# synprep <- readRDS(paste0(globals$tc.dir, sfname, "_rwprep.rds"))
-# synprep <- readRDS(paste0(globals$synd, sfname, "_all_rwprep.rds")) # this file is now in synpuf in Google Drive
-names(synprep)
-
-count(synprep$tc.base, ftype)
-
-
-# now get the reforms and merge in taxbc
-
-# merge and then split
-tcvars <- c("c00100", "taxbc") # taxcalc vars
-mrgdf <- left_join(synprep$tc.base, synprep$tc.output %>% dplyr::select(RECID, tcvars))
-  # backwards compatibility for synthpop3
-  #  %>%mutate(ftype=case_when(ftype=="puf.full" ~ "puf",
-  #                       ftype=="synthpop3" ~ "syn"))
-glimpse(mrgdf)
-count(mrgdf, ftype)
-
-
-#******************************************************************************************************************
-#  pick a subset ####
-#******************************************************************************************************************
-mrgdf2 <- mrgdf %>%
-  filter(MARS==2, c00100>=0, c00100<=25e3)
-
-puffile <- mrgdf2 %>% filter(ftype=="puf")
-synfile <- mrgdf2 %>% filter(ftype=="syn", m==1)
-
-# synfile <- puffile %>% mutate(ftype="syn")
-
-
-#******************************************************************************************************************
-#  set up the "constraint" components of the objective function ####
-#******************************************************************************************************************
-# I refer to "constraint" components of the objective function as the components for which we want to minimize the squared difference of sum vs target
-# for each component, we need:
-#   the variable involved
-#   the "constraint" type, i.e., one of:  n.all, sum.all, n.pos, n.neg, sum.pos, sum.neg
-#   the "constraint" priority -- a multiplier of the squared diff -- the larger the mult, the more important this becomes
-#   the target
-#   the coefficient for each record determining how it enters into the sum that will be compared to the target
-#     for value sums:
-#       for the weight variable it will be 1 x the weight
-#       for other variables it will be the variable times the weight
-#     for numbers of returns it is simply the weight variable
-
-# maybe make a list of objective function elements, or a data frame -- with an associated list of the coefficients
-# the df would have:
-#   elname, elvar, eltype, priority; link to a vector of coefficients based on elname, link to target based on elname
-
-# we may want to see how far off we are on each constraint to help us determine priorities
-# or even automate the priority setting process
-
-# wt, c00100.val, taxbc.val, e00200.val
-recipe <- read_csv("vname, fn
-                   wt, n.sum
-                   c00100, val.sum
-                   taxbc, val.sum
-                   e00200, val.sum,
-                   p23250, val.neg")
-
-# or...
-recipe <- get_recipe_long(get_weighting_recipe("recipe5")) %>%
-  filter(vname %in% names(puffile)) %>%
-  dplyr::select(vname, vname, fn)
-
-
-# start here to adjust a previously created recipe ----
-tscale <- 1
-recipe <- recipe %>%
-  rowwise() %>%
-  mutate(target=do.call(fn, list(puffile, vname, puffile$wt))) %>%
-  ungroup %>%
-  mutate(scale=ifelse(target!=0, abs(target / tscale), 1/ tscale),
-         obj.element=paste0(vname, "_", fn)) %>%
-  dplyr::select(obj.element, vname, fn, scale, target) %>%
-  arrange(vname, fn)
-recipe
-
-#..weed out unnecessary elements of the recipe ----
-# if the target is 0 for negative values we can drop the neg versions AS LONG AS WE HAVE NO SYNTH NEG VERSIONS
-# if the val.pos and val.sum versions are identical then we can drop the val.sum version
-# can drop the "neg" and "pos" versions
-recipe.flagged <- recipe %>%
-  rowwise() %>%
-  mutate(syn.unwtd=do.call(fn, list(synfile, vname, rep(1, nrow(synfile))))) %>% # so we can check if negs!
-  group_by(vname) %>%
-  mutate(flag.dropneg=ifelse(str_detect(fn, "neg") & target==0 & syn.unwtd==0, 1, 0),
-         flag.dropdupsum=ifelse(target==target[match("val.sum", fn)] & (fn=="val.pos"), 1, 0),
-         flag.dropdupn=ifelse(target==target[match("n.sum", fn)] & (fn=="n.pos"), 1, 0)) %>%
-  mutate_at(vars(starts_with("flag")), ~naz(.)) %>%
-  ungroup %>%
-  arrange(vname, fn)
-recipe.flagged
-
-# remove recipe elements where the target is zero
-recipe.use <- recipe.flagged %>%
-  filter(!(flag.dropneg | flag.dropdupsum | flag.dropdupn)) %>%
-  filter(target!=0) %>%
-  dplyr::select(obj.element, vname, fn, scale, target)
-recipe.use
-
-# finally, add priority weights
-recipe.use <- recipe.use %>%
-  mutate(priority.weight=case_when(vname %in% c("wt", "c00100", "e00200", "taxbc") ~ 100,
-                                   fn %in% c("n.sum", "val.sum") ~ 100,
-                                   TRUE ~ 1))  %>% 
-  left_join(puf.vnames %>% dplyr::select(vname, vdesc))
-recipe.use
-
-recipe.use %>% arrange(-priority.weight)
-
-# What would our objective function be if each targeted variable was off by a given % (as a decimal)?
-# pct <- .01
-# sum(recipe.use$priority.weight * (pct^2))
-# # what if they were off by that same pct on average but with a random variation?
-# pctv <- rnorm(nrow(recipe.use), pct, sd=.05)
-# sum(recipe.use$priority.weight * (pctv^2))
-# (pctv *100) %>% round(., 1)
-
-
-#******************************************************************************************************************
-#  prepare the input list ####
-#******************************************************************************************************************
-inputs <- list()
-inputs$recipe <- recipe.use
-inputs$synsub <- synfile[, unique(inputs$recipe$vname)] %>% mutate(wt=1)
-synlong <- inputs$synsub %>%
-  mutate(wtnum=row_number()) %>%
-  gather(vname, value, -wtnum)
-
-# create a data frame with one row for each weight and obj.element combination
-coeffs <- expand.grid(wtnum=1:nrow(inputs$synsub), obj.element=inputs$recipe$obj.element, stringsAsFactors = FALSE) %>%
-  ungroup %>%
-  left_join(inputs$recipe %>% dplyr::select(obj.element, vname, fn, scale, priority.weight, target)) %>%
-  left_join(synlong) %>%
-  mutate(coeff=case_when(fn=="val.sum" ~ value,
-                         fn=="val.pos" ~ value*(value>0),
-                         fn=="val.neg" ~ value*(value<0),
-                         fn=="n.sum" ~ 1,
-                         fn=="n.pos" ~ 1*(value>0),
-                         fn=="n.neg" ~ 1*(value<0),
-                         TRUE  ~ 0)) %>%
-  dplyr::select(obj.element, vname, fn, wtnum, scale, priority.weight, value, coeff, target)
-# glimpse(coeffs)
-# ht(coeffs)
-inputs$coeffs <- coeffs
-
-
-#******************************************************************************************************************
-#  run optimizer(s) ####
-#******************************************************************************************************************
-# inputs$recipe
-
-# bounds on the weights
-xlb <- rep(1, nrow(synfile))
-xub <- rep(1.5*max(puffile$wt), nrow(synfile))
-
-# starting point:
-# x0 <- (xlb + xub) / 2
-x0 <- rep(mean(puffile$wt), nrow(synfile))
-
-# alternatively:
-# set.seed(1234)
-# x0 <- rnorm(nrow(synfile), mean(puffile$wt), sd(puffile$wt)); x0 <- pmax(x0, xlb); x0 <- pmin(x0, xub); quantile(x0)
-# set.seed(1234)
-# x0 <- runif(nrow(synfile), min=1, max=1.5*max(puffile$wt))
-
-
-# PRE-CHECK: Take a look at the values at the starting point
-start <- inputs$recipe %>%
-  rowwise() %>%
-  mutate(calc=do.call(fn, list(synfile, vname, x0)),
-         diff=calc - target,
-         pdiff=diff / target * 100,
-         apdiff=abs(pdiff),
-         sdiffsq=(diff / scale)^2,
-         objfn=sdiffsq * priority.weight) %>%
-  ungroup
-start %>% arrange(-apdiff)
-start %>% arrange(-sdiffsq)
-start %>% arrange(-objfn)
-# END PRE-CHECK
-
-opts <- list("print_level" = 5,
-             "file_print_level" = 5, # integer
-             "linear_solver" = "ma57", # mumps pardiso ma27 ma57 ma77 ma86 ma97
-             "max_iter"=1000,
-             # "derivative_test"="first-order",
-             # "derivative_test_print_all"="yes",
-             "output_file" = "scratch3.out")
-
-a <- proc.time()
-result <- ipoptr(x0 = x0,
-                 lb = xlb,
-                 ub = xub,
-                 eval_f = eval_f_wtfs, 
-                 eval_grad_f = eval_grad_f_wtfs,
-                 opts = opts,
-                 inputs = inputs)
-b <- proc.time()
-b - a
-
-
-a <- proc.time()
-t2 <- mma(x0, 
-          fn=eval_f_wtfs, 
-          gr = eval_grad_f_wtfs,
-          lower=xlb, upper=xub,
-          nl.info = FALSE, 
-          control=list(maxeval=500),
-          inputs=inputs)
-b <- proc.time()
-b - a # 16 mins
-
-names(t2)
-# t2$par
-t2$value
-t2$iter
-t2$convergence
-t2$message
-
-w.sol <- t2$par
-
-
-
-
-# set.seed(1234)
-# x0 <- runif(nrow(synfile), min=1, max=1.5*max(puffile$wt))
-# x0 <- seq(1, 1.5*max(puffile$wt), length.out=nrow(synfile))
-# x0 <- rep(mean(puffile$wt), nrow(synfile))
-
-
-# nloptr.print.options()
-# control = list(xtol_rel = 1e-8)
-nloptr.print.options(opts.show = c("algorithm"))
-
-# iter: obj, secs -- with x0=mean
-# NLOPT_LD_MMA 20: 4.7, 8 secs; 50: 0.5, 18 secs; 100: 0.07, 36 secs; 200: 0.006, 67 secs; 500: 0.00004, 172 secs
-# MMA 50 iter with runif and seed: 1 0.39, 2 0.38
-# MMA 100 iter with runif and seed: 1 0.06, 2 0.08, 3 .067
-# MMA 200 iter with runif and seed: 1 0.0036, 2 , 3 0.005
-# obj 0.0036 looks like it gets apdiff close enough for priority variables
-
-# NLOPT_LD_LBFGS 20: 121, 8; 50: 47, 18 secs; 100, 18.9, 36 secs
-# NLOPT_LD_VAR1 20: 136, 8 secs; 100 21, 37 secs
-# NLOPT_LD_VAR2 20: 136, 7 secs
-# NLOPT_LD_TNEWTON 20: 284, 8 secs
-# NLOPT_LD_TNEWTON_PRECOND_RESTART 20: 256, 7; 100: 96, 35
-# NLOPT_LD_AUGLAG:
-#   NLOPT_LD_MMA 20, 4.7, 8
-#   NLOPT_LN_BOBYQA 20, 737, 11 secs
-#   NLOPT_LN_COBYLA
-#   DO NOT DO THIS NLOPT_LD_SLSQP
-
-# no derivative
-# NLOPT_LN_BOBYQA # 20: 737, 11 secs
-# NLOPT_LN_COBYLA 20: 737 9 secs
-
-# bad
-# DO NOT DO THIS NLOPT_LD_SLSQP # RStudio BLOWS UP
-# NLOPT_LD_LBFGS_NOCEDAL DOESN'T WORK
-
-# uncomment this for auglag, but don't think it's needed
-# local_opts <- list("algorithm" = "NLOPT_LN_COBYLA", "xtol_rel"  = 1.0e-8) # 
-# opts <- list("algorithm" = "NLOPT_LD_AUGLAG",
-#              "xtol_rel"  = 1.0e-8,
-#              "maxeval"   = 20,
-#              "local_opts" = local_opts)
-
-
-# set.seed(1)
-# x0 <- runif(nrow(synfile), min=1, max=1.5*max(puffile$wt))
-opts <- list("algorithm"="NLOPT_LD_MMA",
-             "xtol_rel"=1.0e-8,
-             "maxeval"=200)
-
-a <- proc.time()
-t3 <- nloptr(x0, 
-             eval_f=eval_f_wtfs,
-             eval_grad_f = eval_grad_f_wtfs,
-             lb = xlb, ub = xub,
-             opts = opts, inputs=inputs)
-b <- proc.time()
-b - a
-t3$objective
-
-# format(3.864633e-05, digits=9, scientific=FALSE)
-
-# names(t3)
-t3$objective
-t3$iterations
-t3$message
-
-w.sol <- t3$solution
-
-# a <- proc.time()
-# t4 <- slsqp(x0, 
-#              fn=eval_f_wtfs,
-#              gr = eval_grad_f_wtfs,
-#              lower = xlb, upper = xub,
-#              control = list(maxeval=20), inputs=inputs)
-# b <- proc.time()
-# b - a
-# t4$objective
-
-
-
-
-
-#******************************************************************************************************************
-#  Examine results ####
-#******************************************************************************************************************
-# retrieve a previous run or else use the results from above
-
-
-# ------------------
-w.sol <- result$solution
-# w.sol <- val$solution
-
-inputs$recipe %>% arrange(-priority.weight) %>% head(10)
-
-comp <- inputs$recipe %>%
-  rowwise() %>%
-  mutate(calc=do.call(fn, list(synfile, vname, w.sol)),
-         diff=calc - target,
-         pdiff=diff / target * 100,
-         apdiff=abs(pdiff),
-         sdiffsq=(diff / scale)^2, # scaled diff sq
-         objfn=sdiffsq * priority.weight) %>% # weighted sdiffsq -- the element in the objective function
-  select(obj.element, vname, fn, scale, priority.weight, target, calc, diff, pdiff, apdiff, sdiffsq, objfn, vdesc)
-
-sum(comp$objfn)
-result$objective 
-
-comp %>%
-  arrange(-sdiffsq)
-
-comp %>%
-  arrange(-objfn)
-
-comp %>%
-  arrange(-apdiff)
-
-comp %>%
-  arrange(apdiff)
-
-comp %>% filter(var %in% c("wt", 'c00100', "e00200", "taxbc"))
-
-comp %>%
-  select(obj.element, target, calc, diff, pdiff, apdiff, vdesc) %>%
-  arrange(-apdiff) %>%
-  kable(digits=c(0, 0, 0, 0, 3, 3, 0), format.args=list(big.mark = ','))
-
-comp %>%
-  select(obj.element, target, calc, diff, pdiff, apdiff, vdesc, priority.weight) %>%
-  filter(obj.element %in% inputs$recipe$obj.element[inputs$recipe$priority.weight > 1]) %>%
-  arrange(-apdiff) %>%
-  kable(digits=c(0, 0, 0, 0, 3, 3, 0, 0), format.args=list(big.mark = ','))
-  
-quantile(w.sol, probs=0:10/10)
-quantile(synfile$wt, probs=0:10/10)
-quantile(puffile$wt, probs=0:10/10)
-
-p <- bind_rows(tibble(w=puffile$wt, type="1_puf"),
-          tibble(w=w.sol, type="2_weights_from_scratch"),
-          tibble(w=synfile$wt, type="3_synthesized")) %>%
-  ggplot(aes(w)) +
-  geom_histogram(binwidth=25, fill="blue") +
-  geom_vline(aes(xintercept = median(w))) +
-  scale_x_continuous(breaks=seq(0, 5000, 250)) +
-  theme(axis.text.x=element_text(size=8, angle=30)) +
-  facet_wrap(~type, nrow=3) +
-  ggtitle("Distribution of weights")
-p
-
-# ggsave("./results/optim_example_hist.png", plot=p)
-
-
-#******************************************************************************************************************
-# FULL file - solve problem in pieces ####
-#******************************************************************************************************************
-#.. My files start with synthpop ----
-# sfname <- "synthpop5"
-# sfname <- "synthpop6"
-# sfname <- "synthpop7"
-# sfname <- "synthpop8"
-sfname <- "synthpop10"
-synprep <- readRDS(paste0(globals$tc.dir, sfname, "_rwprep.rds"))
-
-#.. Max's files start with synpuf ----
-# sfname <- "synpuf17"
-sfname <- "synpuf20"
-sfname <- "synpuf20_lowmatch"
-# get weight variable as it is needed below
-synprep <- readRDS(paste0(globals$tc.dir, sfname, "_rwprep.rds"))
-#.... here is the fix ----
-synprep$tc.base <- synprep$tc.base %>%
-  mutate(wt=ifelse(ftype=="puf", wt.puf, wt.syn),
-         wt=ifelse(ftype=="syn", wt / 5, wt))
-
-synprep$tc.base %>%
-  group_by(ftype) %>%
-  do(qtiledf(.$wt))
-#.... end of temporary fix ----
-
-
-names(synprep)
-
-# now get the reforms and merge in taxbc, then merge and then split
-tcvars <- c("c00100", "taxbc") # taxcalc vars
-mrgdf <- left_join(synprep$tc.base, synprep$tc.output %>% dplyr::select(RECID, tcvars)) %>%
-  mutate(mgroup=ifelse(MARS %in% 1:2, MARS, 3))
-glimpse(mrgdf)
-count(mrgdf, ftype)
-count(mrgdf, ftype, mgroup, msname)
-names(mrgdf) %>% sort
-
-mrgdf %>%
-  group_by(ftype, m) %>%
-  summarise(n=n(), wtsum=sum(wt))
-
-# tmp <- mrgdf %>% filter(is.na(c00100))
-# count(tmp, ftype, mgroup, m)
-# names(tmp)
-# summary(tmp)
-# 
-# mrgdf %>%
-#   group_by(ftype) %>%
-#   summarise(vmax=max(e01200))
-# anyDuplicated(mrgdf$RECID)  
-
-
-# get full versions of the two files
-m.num <- max(mrgdf$m)
-puf <- mrgdf %>% filter(ftype=="puf")
-syn <- mrgdf %>% filter(ftype=="syn") %>% mutate(wt=wt / m.num)
-sum(puf$wt)
-sum(syn$wt)
-# note that RECID is sequential from 1 on puf to the highest value on syn and is unique
-
-
-# get groups that are split by marital status and by agi in thousand dollar increments,
-# then collapse so that they have at least 1,000 in both puf and syn
-low.g1 <- seq(0, 80e3, 1e3)
-low.g2 <-  seq(80e3, 100e3, 5e3)
-low.g <- c(low.g1, low.g2)
-mid.g <- seq(low.g[length(low.g)], 1e6, 10e3)
-high.g <- seq(mid.g[length(mid.g)], 10e6, 100e3)
-agibreaks <- c(-Inf, -1e5, -5e3, low.g, mid.g, high.g, Inf) %>% unique %>% sort
-agibreaks
-
-summary(mrgdf$c00100)
-
-groups <- mrgdf %>%
-  mutate(agibreak=cut(c00100, agibreaks),
-         ibreak=as.integer(agibreak)) %>%
-  group_by(ftype, mgroup, agibreak, ibreak) %>%
-  summarise(n=n()) %>%
-  mutate(imin=agibreaks[ibreak])
-groups
-groups %>% filter(ftype=="puf")
-tmp <- groups %>% filter(ftype=="syn")
-
-groupit <- function(df){
-  # if group puf or syn is less than min.gcount, put the rec into the prior group
-  min.gcount <- 500
-  
-  puf.gcount <- 0
-  df$puf.gcount <- 0
-  
-  df$imin.new <- df$imin
-  
-  for(i in 1:nrow(df)){
-    if(puf.gcount < min.gcount){
-      puf.gcount <- puf.gcount + df$puf[i] # add this rec to group count
-      df$puf.gcount[i] <- puf.gcount
-      if(i > 1) df$imin.new[i] <- df$imin.new[i - 1]
-    } else {
-      df$puf.gcount[i] <- df$puf[i]
-      puf.gcount <- df$puf[i] # set the group counter to start with this record
-    }
-  }
-  return(df)
-}
-
-g2 <- groups %>% 
-  spread(ftype, n) %>%
-  group_by(mgroup) %>%
-  mutate_at(vars(puf, syn), funs(naz)) %>%
-  do(groupit(.))
-glimpse(g2)
-
-g3 <- g2 %>%
-  group_by(mgroup, imin.new) %>%
-  summarise(puf=sum(puf), syn=sum(syn))
-g3
-
-g3 %>% filter(mgroup==1)
-g3 %>% filter(mgroup==2) %>% as.data.frame
-g3 %>% filter(mgroup==3)
-
-g3 %>%
-  group_by(mgroup) %>%
-  summarise(puf.min=min(puf), puf.max=max(puf), syn.min=min(syn), syn.max=max(syn))
-  
-
-#.. create split rules ----
-split.rules <- g3 %>% 
-  rename(imin=imin.new) %>%
-  group_by(mgroup) %>%
-  mutate(imax=lead(imin),
-         imax=ifelse(is.na(imax), Inf, imax)) %>%
-  ungroup %>%
-  mutate(group=row_number()) %>%
-  dplyr::select(group, mgroup, imin, imax, pufcount=puf, syncount=syn)
-sum(split.rules$pufcount)
-sum(split.rules$syncount)
-
-
-# prepare the files for splitting
-getgroup <- function(mgroup.in, c00100){
-  split <- split.rules %>% filter(mgroup==mgroup.in[1])
-  igroup.element <- function(c00100) min(which(c00100 < split$imax))
-  group <- split$group[sapply(c00100, igroup.element)]
-  # split$group[min(which(c00100 < split$imax))]
-  return(group)
-}
-getgroup(1, c(-100, -1, 0, 1))
-
-# decide on the sample ----
-
-idfile <- mrgdf %>%
-  mutate(mgroup=ifelse(MARS %in% 1:2, MARS, 3)) %>%
-  group_by(ftype, mgroup) %>%
-  mutate(group=getgroup(mgroup, c00100)) %>%
-  ungroup %>%
-  dplyr::select(ftype, RECID, mgroup, group) %>%
-  arrange(RECID)
-ht(idfile)
-count(idfile, mgroup, ftype, group) %>% spread(ftype, n) %>% mutate(diff=syn - puf, sum=puf + syn)
-
-count(idfile, group) %>% ht(20)
-
-# now we are ready to run the file in pieces
-
-
-rungroup <- function(group.ind){
-  a <- proc.time()
-  
-  getrec <- function(puf, syn, recipe, puf.vnames){
-    # adjust a previously created recipe
-    tscale <- 1
-    
-    # use get rather than do.call to find a function as do.call does not seem to work in parallel
-    recipe$target <- NA_real_
-    for(i in 1:nrow(recipe)){
-      recipe$target[i] <- get(recipe$fn[i])(df=puf, var=recipe$vname[i], puf$wt)
-    }
-    
-    recipe <- recipe %>%
-      mutate(scale=ifelse(target!=0, abs(target / tscale), 1/ tscale),
-             obj.element=paste0(vname, "_", fn)) %>%
-      dplyr::select(obj.element, vname, fn, scale, target) %>%
-      arrange(vname, fn)
-
-    #..weed out unnecessary elements of the recipe ----
-    # if the target is 0 for negative values we can drop the neg versions AS LONG AS WE HAVE NO SYNTH NEG VERSIONS
-    # if the val.pos and val.sum versions are identical then we can drop the val.sum version
-    # can drop the "neg" and "pos" versions
-    recipe.flagged <- recipe 
-    recipe.flagged$syn.unwtd <- NA_real_
-    for(i in 1:nrow(recipe.flagged)){
-      recipe.flagged$syn.unwtd[i] <- get(recipe.flagged$fn[i])(df=syn, var=recipe.flagged$vname[i], weight=rep(1, nrow(syn)))
-    }
-    recipe.flagged <- recipe.flagged %>%
-      group_by(vname) %>%
-      mutate(flag.dropneg=ifelse(str_detect(fn, "neg") & target==0 & syn.unwtd==0, 1, 0),
-             flag.dropdupsum=ifelse(target==target[match("val.sum", fn)] & (fn=="val.pos"), 1, 0),
-             flag.dropdupn=ifelse(target==target[match("n.sum", fn)] & (fn=="n.pos"), 1, 0)) %>%
-      mutate_at(vars(starts_with("flag")), funs(naz)) %>%
-      ungroup %>%
-      arrange(vname, fn)
-
-    # remove recipe elements where the target is zero
-    recipe.use <- recipe.flagged %>%
-      filter(!(flag.dropneg | flag.dropdupsum | flag.dropdupn)) %>%
-      filter(target!=0) %>%
-      dplyr::select(obj.element, vname, fn, scale, target)
-
-    # finally, add priority weights
-    recipe.use <- recipe.use %>%
-      mutate(priority.weight=case_when(vname %in% c("wt", "c00100", "e00200", "taxbc") ~ 100,
-                                       fn %in% c("n.sum", "val.sum") ~ 100,
-                                       TRUE ~ 1))  %>%
-      left_join(puf.vnames %>% dplyr::select(vname, vdesc))
-    return(list(recipe.use=recipe.use, recipe.flagged=recipe.flagged))
-  }
-  
-  getinplist <- function(syn, recipe.use){
-    inputs <- list()
-    inputs$recipe <- recipe.use
-    # inputs$synsub <- syn[, unique(inputs$recipe$vname)] %>% mutate(wt=1)
-    inputs$synsub <- syn %>% dplyr::select(unique(inputs$recipe$vname)) %>% mutate(wt=1)
-    synlong <- inputs$synsub %>%
-      dplyr::mutate(wtnum=row_number()) %>%
-      gather(vname, value, -wtnum)
-
-    # create a data frame with one row for each weight and obj.element combination
-    coeffs <- expand.grid(wtnum=1:nrow(inputs$synsub), 
-                          obj.element=inputs$recipe$obj.element, stringsAsFactors = FALSE) %>%
-      ungroup %>%
-      left_join(inputs$recipe %>% dplyr::select(obj.element, vname, fn, scale, priority.weight, target)) %>%
-      left_join(synlong) %>%
-      mutate(coeff=case_when(fn=="val.sum" ~ value,
-                            fn=="val.pos" ~ value*(value>0),
-                            fn=="val.neg" ~ value*(value<0),
-                            fn=="n.sum" ~ 1,
-                            fn=="n.pos" ~ 1*(value>0),
-                            fn=="n.neg" ~ 1*(value<0),
-                            TRUE  ~ 0)) %>%
-      dplyr::select(obj.element, vname, fn, wtnum, scale, priority.weight, value, coeff, target)
-
-    inputs$coeffs <- coeffs
-    return(inputs)
-  }
-  
-  base <- left_join(idfile %>% filter(group==group.ind), mrgdf)
-  puf <- base %>% filter(ftype=="puf")
-  syn <- base %>% filter(ftype=="syn")
-  recipes <- getrec(puf, syn, recipe, puf.vnames)
-  recipe.use <- recipes$recipe.use
-  inputs <- getinplist(syn, recipe.use)
-
-  # bounds on the weights
-  xlb <- rep(1, nrow(syn))
-  xub <- rep(1.5*max(puf$wt), nrow(syn)) # FIX THIS djb
-
-  # starting point:
-  x0 <- (xlb + xub) / 2
-  x0 <- x0 * sum(puf$wt / sum(x0))
-  
-  opts <- list("algorithm"="NLOPT_LD_MMA",
-               "xtol_rel"=1.0e-8,
-               "maxeval"=500)
-  result <- nloptr(x0, 
-               eval_f=eval_f_wtfs,
-               eval_grad_f = eval_grad_f_wtfs,
-               lb = xlb, ub = xub,
-               opts = opts, inputs=inputs)
-
-  # result <- mma(x0, fn=eval_f_wtfs, gr=eval_grad_f_wtfs,
-  #               lower=xlb, upper=xub,
-  #               nl.info = FALSE, inputs=inputs)
-  
-  #.. CAUTION: some pieces of result are corrupted by parallel processing ----
-  # set them to null or the output files become huge!!
-  # result$eval_f and result$nloptr_environment were corrupted
-  result$eval_f <- NULL
-  result$nloptr_environment <- NULL
-  # END CAUTION ----
-  
-  optim <- list()
-  optim$result <- result
-  optim$puf <- puf
-  optim$syn <- syn
-  optim$inputs <- inputs
-  optim$recipe.flagged <- recipes$recipe.flagged
-  # 
-  saveRDS(optim, paste0(globals$tc.dir, "weight_pieces/optim_group_", group.ind, ".rds"))
-  
-  b <- proc.time()
-  print(b - a)
-  return(inputs)
-}
-
-
-
-library("doParallel")
-cl <- makeCluster(6)
-registerDoParallel(cl)
-
-# define recipe if new one desired
-recipe <- get_recipe_long(get_weighting_recipe("recipe5")) %>%
-  filter(vname %in% names(puf)) %>%
-  dplyr::select(vname, vname, fn)
-
-packages <- c("magrittr", "tidyverse", "dplyr", "nloptr")
-# CAUTION:  DO NOT PASS large items as function arguments
-# instead export them
-xport <- c("globals", "idfile", "recipe", "puf.vnames", "mrgdf",
-           "n.neg", "n.pos", "n.sum", "val.neg", "val.pos", "val.sum",
-           "naz", "eval_f_wtfs", "eval_grad_f_wtfs") 
-popts <- list(.packages=packages, .export=xport)
-popts
-
-# 1:max(idfile$group)
-# Warning message:
-#   Unknown or uninitialised column: 'target'.
-
-a <- proc.time()
-warn <- options()$warn
-options(warn=-1)
-d <- llply(1:max(idfile$group), .progress="text", .parallel=TRUE, .paropts=popts, .fun=rungroup)
-# d1 <- llply(4:4, .progress="text", .parallel=FALSE, .paropts=popts, .fun=rungroup)
-options(warn=warn)
-b <- proc.time()
-b - a
-
-stopCluster(cl)
-# d2 <- d
-# 
-# d <- c(d1, d2)
-
-
-
-#******************************************************************************************************************
-# ERROR checking ####
-#******************************************************************************************************************
-
-#.. CAUTION: RESAVE without pieces that were corrupted by parallel processing ----
-resave <- function(group.ind){
-  # optim$result$eval_f and optim$result$nloptr_environment were corrupted
-  optim <- readRDS(paste0(globals$tc.dir, "weight_pieces/optim_group_", group.ind, ".rds"))
-  optim$result$eval_f <- NULL
-  optim$result$nloptr_environment <- NULL
-  saveRDS(optim, paste0(globals$tc.dir, "weight_pieces/optim_group_", group.ind, ".rds"))
-}
-n <- 214
-l_ply(1:n, resave, .progress="text")
-#.. END CAUTION -----
-
-tmp <- readRDS(paste0(globals$tc.dir, "weight_pieces/optim_group_", 4, ".rds"))
-
-names(tmp)
-object.size(tmp)
-object.size(tmp$result)
-object.size(tmp$puf)
-object.size(tmp$syn)
-object.size(tmp$inputs)
-object.size(tmp$recipe.flagged)
-glimpse(tmp$syn)
-memory()
-# saveRDS(tmp, "d:/tmp1.rds")
-
-# hmmm...tmp$result is causing the problem
-# [1] "x0"                     "eval_f"                 "lower_bounds"           "upper_bounds"           "num_constraints_ineq"  
-# [6] "eval_g_ineq"            "num_constraints_eq"     "eval_g_eq"              "options"                "local_options"         
-# [11] "nloptr_environment"     "call"                   "termination_conditions" "status"                 "message"               
-# [16] "iterations"             "objective"              "solution"               "version"                "num.evals"   
-tmp4 <- list()
-tmp4$val <- tmp$result$num.evals
-saveRDS(tmp4, "d:/tmp4.rds")
-
-# tmp4.par <- tmp
-
-gind <- 10
-my1 <- readRDS(paste0("D:/tcdir/weight_pieces/synthpop8_500iter/optim_group_", gind, ".rds"))
-max1 <- readRDS(paste0(globals$tc.dir, "weight_pieces/optim_group_", gind, ".rds"))
-
-nrow(my1$puf)
-nrow(max1$puf)
-
-nrow(my1$syn)
-nrow(max1$syn)
-
-my1$result$objective
-max1$result$objective
-
-my1$result$solution %>% ht
-max1$result$solution %>% ht
-
-str(tmp$result$nloptr_environment) # tmp$result$eval_f and tmp$result$nloptr_environment got corrupted somehow
-
-# tmp4$result <- tmp$result
-# tmp4$puf <- tmp$puf
-# tmp4$syn <- tmp$syn
-# tmp4$inputs <- tmp$inputs
-# tmp4$recipe.flagged <- tmp$recipe.flagged
-
-n <- 214
-mypiece <- function(group.ind){
-  optim <- readRDS(paste0("D:/tcdir/weight_pieces/synthpop8_500iter/optim_group_", group.ind, ".rds"))
-}
-mylist <- llply(1:n, mypiece, .progress="text")
-optlist <- llply(1:n, getpiece, .progress="text")
-
-max.obj <- laply(1:n, function(i) optlist[[i]]$result$objective)
-my.obj <- laply(1:n, function(i) mylist[[i]]$result$objective)
-
-objcomp <- tibble(i=1:length(max.obj), synpuf17=max.obj, synthpop8=my.obj)
-
-cor(objcomp[, c("synpuf17", "synthpop8")])
-
-objcomp %>%
-  gather(file, obj, -i) %>%
-  group_by(file) %>%
-  do(qtiledf(.$obj, probs=c(0, .01, .05, .1, .25, .5, .75, .9, .95, .99, 1))) %>%
-  dplyr::select(-n) %>%
-  gather(ptile, value, -file, -n.notNA) %>%
-  mutate(ptile=factor(ptile, levels=unique(ptile))) %>%
-  spread(file, value) %>%
-  dplyr::select(ptile, n.notNA, synthpop8, synpuf17) %>%
-  kable(digits=2, format.args=list(big.mark = ','))
-
-objcomp %>%
-  arrange(-pmax(synpuf17, synthpop8)) %>%
-  head(25) %>%
-  kable(digits=1, format.args=list(big.mark = ','))
-    
-
-probs <- c(0, .01, .05, .1, .25, .5, .75, .9, .95, .99, 1)
-quantile(max.obj, probs)
-quantile(my.obj, probs)
-
-split.rules %>% 
-  filter(group %in% c(1, 180, 67, 177, 190)) %>%
-  dplyr::select(-syncount) %>%
-  kable(digits=0, format.args=list(big.mark = ','))
-
-split.rules %>% 
-  filter(group %in% c(209, 210, 57, 58, 124)) %>%
-  dplyr::select(-syncount) %>%
-  kable(digits=0, format.args=list(big.mark = ','))
-
-#..END error checking ----
-
-
-#******************************************************************************************************************
-# Construct and save full file ####
-#******************************************************************************************************************
-getpiece <- function(group.ind){
-  optim <- readRDS(paste0(globals$tc.dir, "weight_pieces/optim_group_", group.ind, ".rds"))
-}
-
-n <- 214
-optlist <- llply(1:n, getpiece, .progress="text")
-memory()
-
-# optlist <- llply(2:3, getpiece, .progress="text")
-# i <- 1; object.size(optlist[[i]]) / 1e6
-
-length(optlist)
-i <- 1
-# i <- 2
-names(optlist[[i]])
-names(optlist[[i]]$inputs)
-optlist[[i]]$inputs$recipe
-optlist[[i]]$recipe.flagged
-unique(optlist[[i]]$recipe.flagged$vname)
-names(optlist[[i]]$result)
-names(optlist[[i]]$syn)
-glimpse(optlist[[i]]$syn)
-# optlist[[i]]$syn$RECID %>% ht
-# anyDuplicated(c(optlist[[1]]$syn$RECID, optlist[[2]]$syn$RECID))
-
-
-# analyze summary result
-# obj.vals <- laply(1:n, function(i) optlist[[i]]$result$value)
-obj.vals <- laply(1:n, function(i) optlist[[i]]$result$objective)
-# obj.vals <- {lapply(1:n, function(i) optlist[[i]]$result$value)} %>% unlist
-ht(obj.vals)
-quantile(obj.vals, probs=c(0, .01, .05, .25, .5, .75, .9, .95, .99, .995, 1))
-obj.vals %>% round(3)
-obj.vals %>% sort %>% round(3) 
-
-message <- laply(1:n, function(i) optlist[[i]]$result$message)
-count(tibble(message), message)
-
-table(laply(1:n, function(i) optlist[[i]]$result$iterations))
-# table(laply(1:n, function(i) optlist[[i]]$result$convergence))
-
-count(idfile, mgroup, ftype, group) %>% spread(ftype, n) %>% mutate(diff=syn - puf, sum=puf + syn)
-
-# match the groups up with their obj value
-objdf <- split.rules %>%
-  mutate(obj=obj.vals)
-
-objdf %>% 
-  kable(digits=c(rep(0, 6), 2), format.args=list(big.mark = ','))
-
-objdf %>% 
-  arrange(-obj) %>%
-  kable(digits=c(rep(0, 6), 2), format.args=list(big.mark = ',')) %>%
-  kable_styling()
-
-# 10 worst groups:
-#   | group| mgroup|      imin|      imax| pufcount| syncount|      obj|
-#   |-----:|------:|---------:|---------:|--------:|--------:|--------:|
-#   |   147|      3| 5,400,000|       Inf|      169|      502| 7,889.50|
-#   |     5|      1|     4,000|     6,000|    2,592|    7,525| 4,783.01|
-#   |     4|      1|     2,000|     4,000|    2,635|    8,035| 4,066.38|
-#   |    21|      1|    36,000|    38,000|      962|    2,617| 2,334.46|
-#   |   129|      3|    12,000|    14,000|      983|    2,853|   940.82|
-#   |     1|      1|      -Inf|    -5,000|      994|    3,914|   888.06|
-#   |    45|      2|      -Inf|  -100,000|    2,007|    6,873|   329.25|
-#   |    50|      2|    14,000|    18,000|    1,243|    3,640|   310.03|
-#   |    47|      2|    -5,000|     4,000|      807|    4,081|   212.88|
-#   |   131|      3|    16,000|    18,000|      978|    2,661|   108.57|
-# about another 10 with obj in [1, 100]; rest are obj < 1
-# esp. bad groups: mars 1 >$5.4m; mars 1 $4-6k, mars 1 $2-4k, mars 1, $36-38k
-
-
-# aggregate the pieces of the puf and synthetic files, and attach new weights
-# first puf
-puf.agg <- ldply(1:n, function(i) optlist[[i]]$puf)
-names(puf.agg)
-ht(puf.agg[, c(1:5, (ncol(puf.agg)-5):ncol(puf.agg))]) # NOTE that RECIDs are not in order
-min(puf.agg$RECID); max(puf.agg$RECID)
-puf.agg <- puf.agg %>% arrange(RECID)
-
-
-# now synthetic
-# syn.agg <- ldply(1:n, function(i) {optlist[[i]]$syn %>% mutate(wt.wtfs=optlist[[i]]$result$par)})
-syn.agg <- ldply(1:n, function(i) {optlist[[i]]$syn %>% mutate(wt.wtfs=optlist[[i]]$result$solution)})
-names(syn.agg) %>% sort
-ht(syn.agg[, c(1:5, ncol(syn.agg))]) # RECIDs not in order here, either
-syn.agg <- syn.agg %>%
-  mutate(wt.syn=wt, wt=wt.wtfs, ftype="syn")
-
-# save the wtfs file; also save puf counterpart
-#sfname <- "synthpop10"
-sfname <- "synpuf20_lowmatch"
-saveRDS(syn.agg, paste0(globals$tc.dir, sfname, "_wfs", ".rds"))
-write_csv(syn.agg, paste0(globals$synd, "syntheses/", sfname, "_wfs", ".csv"))
-# saveRDS(syn.agg, paste0(globals$tc.dir, "synthpop5_all_wtfs_new", ".rds"))
-
-# now save the stacked output as csv
-glimpse(puf.agg)
-glimpse(syn.agg)
-setdiff(names(puf.agg), names(syn.agg))
-setdiff(names(syn.agg), names(puf.agg))
-stack <- bind_rows(puf.agg, syn.agg)
-count(stack, ftype)
-summary(stack %>% dplyr::select(starts_with("wt")))
-saveRDS(stack, paste0(globals$tc.dir, sfname, "_wfs_stack", ".rds"))
-write_csv(stack, paste0(globals$synd, sfname, "_wfs_stack", ".csv"))
-# synpuf17_wfs_stack.csv
-
-#******************************************************************************************************************
-# Explore results vs syn and vs puf counterpart ####
-#******************************************************************************************************************
-n <- 214
-altpiece <- function(group.ind){
-  optim <- readRDS(paste0("D:/tcdir/weight_pieces/synthpop8_500iter/optim_group_", group.ind, ".rds"))
-}
-altlist <- llply(1:n, altpiece, .progress="text")
-puf.agg <- ldply(1:n, function(i) altlist[[i]]$puf)
-syn.agg <- readRDS(paste0(globals$tc.dir, "synthpop8", "_wfs", ".rds"))
-names(syn.agg)
-
-nsamples <- max(syn.agg$m)
-nsamples <- 5
-stack <- bind_rows(puf.agg,
-                   syn.agg %>% mutate(wt=wt.syn, ftype="syn"),
-                   syn.agg %>% mutate(wt=wt.wtfs, ftype="wtfs")) %>%
-  mutate(wt=ifelse(ftype=="syn", wt / 5, wt)) # needed for synthpop8
-
-count(stack, ftype)
-stack %>%
-  group_by(ftype) %>%
-  # mutate(wt=ifelse(ftype=="syn", w 5, wt)) %>%
-  do(qtiledf(.$wt, probs=c(0, .01, .05, .1, .25, .5, .75, .8, .85, .9, .95, .99, 1)))
-
-p <- stack %>%
-  mutate(wt=ifelse(ftype=="puf", wt / 3, wt)) %>%
-  ggplot(aes(x=wt, y = ..density..)) +
-  geom_histogram(binwidth=25, fill="blue") +
-  geom_vline(aes(xintercept = median(wt))) +
-  scale_x_continuous(breaks=seq(0, 5000, 250), limits=c(0, 1500)) +
-  theme(axis.text.x=element_text(size=8, angle=30)) +
-  facet_wrap(~ftype, nrow=3) +
-  ggtitle("Distribution of weights")
-p
-
-# summaries by income range
-agiranges <- c(-Inf, 0, 25e3, 50e3, 75e3, 100e3, 200e3, 500e3, 1e6, 10e6, Inf)
-vlist <- c("c00100", "e00200", "e00300", "e00600", "e01700", "p23250", "taxbc")
-dfsums <- stack %>%
-  mutate(agirange=cut(c00100, agiranges, right=FALSE),
-         wtone=1e9) %>%
-  dplyr::select(ftype, agirange, wt, wtone, vlist) %>%
-  gather(vname, value, -ftype, -agirange, -wt) %>%
-  group_by(ftype, agirange, vname) %>%
-  summarise(n=n(), wtsum.m=sum(wt) / 1e6, valsum.b=sum(wt * value) / 1e9) %>%
-  left_join(puf.vnames %>% dplyr::select(vname, vdesc))
-dfsums
-
-f <- function(vname.in, stat.in){
-  dfsums %>%
-    filter(vname==vname.in) %>%
-    dplyr::select(ftype, agirange, stat=stat.in, vname, vdesc) %>%
-    spread(ftype, stat) %>%
-    janitor::adorn_totals(where="row") %>%
-    mutate_at(vars(syn, wtfs), funs(diff=. - puf, pdiff=(. - puf) / puf * 100)) %>%
-    dplyr::select(-c(vname, vdesc), everything(), vname, vdesc) %>%
-    kable(digits=c(0, rep(1, 5), rep(1, 2)), format.args=list(big.mark = ','))
-}
-
-f("c00100", stat="valsum.b")
-f("e00200", stat="valsum.b")
-f("taxbc", stat="valsum.b")
-f("e01700", stat="valsum.b") # way off
-
-dfsums.m <- stack %>%
-  mutate(agirange=cut(c00100, agiranges, right=FALSE),
-         wtone=1e9) %>%
-  dplyr::select(ftype, mgroup, agirange, wt, wtone, vlist) %>%
-  gather(vname, value, -ftype, -mgroup, -agirange, -wt) %>%
-  group_by(ftype, mgroup, agirange, vname) %>%
-  summarise(n=n(), wtsum.m=sum(wt) / 1e6, valsum.b=sum(wt * value) / 1e9) %>%
-  left_join(puf.vnames %>% dplyr::select(vname, vdesc))
-dfsums.m
-
-fm <- function(vname.in, stat.in, mgroup.in=1:3){
-  dfsums.m %>%
-    filter(vname==vname.in, mgroup %in% mgroup.in) %>%
-    dplyr::select(ftype, mgroup, agirange, stat=stat.in, vname, vdesc) %>%
-    spread(ftype, stat) %>%
-    janitor::adorn_totals(where="row") %>%
-    mutate_at(vars(syn, wtfs), funs(diff=. - puf, pdiff=(. - puf) / puf * 100)) %>%
-    mutate(stat=stat.in) %>%
-    dplyr::select(-c(vname, vdesc), everything(), stat, vname, vdesc) %>%
-    kable(digits=c(0, 0, rep(2, 5), rep(1, 2)), format.args=list(big.mark = ','))
-}
-
-fm("c00100", stat="wtsum.m")
-fm("c00100", stat="valsum.b")
-fm("e00200", stat="valsum.b")
-fm("taxbc", stat="valsum.b")
-fm("e01700", stat="valsum.b")
-
-fm("c00100", stat="wtsum.m", 1)
-fm("c00100", stat="valsum.b", 3)
-fm("e00200", stat="valsum.b")
-fm("taxbc", stat="valsum.b", 2)
-fm("e01700", stat="valsum.b")
-
-# optlist[[1]]$inputs$recipe
-# 53 target elements x 147 file groups ~7.8k targets
-# esp. bad groups: mars 1 >$5.4m; mars 1 $4-6k, mars 1 $2-4k, mars 1, $36-38k
-# but not many people or much $ in these groups
-
-# quick check on stack ----
-sfname <- "synthpop10"
-df <- readRDS(paste0(globals$tc.dir, sfname, "_wfs_stack", ".rds"))
-names(df) %>% sort
-
-f <- function(x, wt) sum(x * wt) / 1e9
-df %>%
-  group_by(ftype, msname) %>%
-  summarise(nret=sum(wt) / 1e6, 
-            c00100=f(c00100, wt), 
-            e00600=f(e00600, wt),
-            p22250=f(p22250, wt),
-            p23250=f(p23250, wt),
-            taxbc=f(taxbc, wt)) %>%
-  pivot_longer(cols=-c(ftype, msname), names_to = "variable", values_to = "value") %>%
-  pivot_wider(names_from = ftype, values_from = value) %>%
-  mutate(diff=syn - puf,
-         pdiff=diff / puf * 100) %>%
-  kable(digits=2)
-
-
-
-#******************************************************************************************************************
-# DEFUNCT: Temporary clunky approach to getting all 3 weights for the synfile ####
-#******************************************************************************************************************
-
-# tmp <- readRDS(paste0(globals$tc.dir, sfname, "_reweighted_stackedfiles.rds"))
-# weights <- tibble(rownum=tmp$RECID[tmp$ftype=="puf.full"],
-#                   puf.RECID=tmp$RECID[tmp$ftype=="puf.full"],
-#                   puf.wt=tmp$wt[tmp$ftype=="puf.full"],
-#                   syn.RECID=tmp$RECID[tmp$ftype=="synthpop3"],
-#                   syn.wt=tmp$wt[tmp$ftype=="synthpop3"],
-#                   syn.rwt=tmp$wt[tmp$ftype=="synthpop3.rwt"])
-# ht(weights)
-
-
-
-
-
-
-#******************************************************************************************************************
-# DEFUNCT -- look at other nonlinear solvers ####
-#******************************************************************************************************************
-
-#******************************************************************************************************************
-#  DEoptim ####
-#******************************************************************************************************************
-library("RcppDE")
-Rosenbrock <- function(x){
-  x1 <- x[1]
-  x2 <- x[2]
-  100 * (x2 - x1 * x1)^2 + (1 - x1)^2
-}
-## DEoptim searches for minima of the objective function between
-## lower and upper bounds on each parameter to be optimized. Therefore
-## in the call to DEoptim we specify vectors that comprise the
-## lower and upper bounds; these vectors are the same length as the
-## parameter vector.
-lower <- c(-10,-10)
-upper <- -lower
-## run DEoptim and set a seed first for replicability
-set.seed(1234)
-DEoptim(Rosenbrock, lower, upper)
-## increase the population size
-DEoptim(Rosenbrock, lower, upper, DEoptim.control(NP = 100))
-
-a <- proc.time()
-tmp <- DEoptim(eval_f_wtfs, xlb, xub, control = DEoptim.control(trace = FALSE, NP = 1000), inputs=inputs)
-b <- proc.time()
-b - a
-
-names(tmp)
-names(tmp$optim)
-tmp$optim$bestval
-tmp$optim$nfeval
-tmp$optim$iter
-
-w.sol <- tmp$optim$bestmem
-quantile(w.sol)
-
-
-#******************************************************************************************************************
-# trustOptim ####
-#******************************************************************************************************************
-# NO GOOD - cannot set bounds, gives negative weights
-install.packages("trustOptim")
-library("trustOptim")
-
-val <- trust.optim(x0, fn=eval_f_full_scaled, gr=eval_grad_f_full_scaled, hs=NULL,
-                   method = "SR1", control = list(report.precision=1L, function.scale.factor=-1),
-                   inputs=inputs)
-
-
-#******************************************************************************************************************
-# optimx ####
-#******************************************************************************************************************
-# install.packages("optimx")
-# install.packages("numDeriv")
-# numDeriv
-library("optimx")
-# c("Nelder-Mead","BFGS")
-# methods that allow box constraints
-# Rcgmin bobyqa L-BFGS-B Rvmmmin maybe spg
-
-grad.nd <- function(x, inputs) {
-  require(numDeriv)
-  grad.nd <- grad(eval_f_full_scaled, x, inputs=inputs)
-  return(grad.nd)
-}
-
-opx <- optimx(x0, fn=eval_f_full_scaled, gr=grad.nd, hess=NULL,
-              lower=xlb, upper=xub,
-              method="bobyqa", itnmax=100, hessian=FALSE,
-              control=list(trace=3),
-              inputs=inputs)
-
-opx <- optimx(x0, fn=eval_f_full_scaled, gr=eval_grad_f_full_scaled, hess=NULL,
-              lower=xlb, upper=xub,
-              method="bobyqa", itnmax=100, hessian=FALSE,
-              control=list(trace=3),
-              inputs=inputs)
-
-
-
-
 
 # library("doParallel")
 # cl <- makeCluster(6)
 # registerDoParallel(cl)
 # 
-# packages <- c("magrittr", "tidyverse", "dplyr", "survey")
+# # define recipe if new one desired
+# recipe <- get_recipe_long(get_weighting_recipe("recipe5")) %>%
+#   filter(vname %in% names(puf)) %>%
+#   dplyr::select(vname, vname, fn)
+# 
+# packages <- c("magrittr", "tidyverse", "dplyr", "nloptr")
 # # CAUTION:  DO NOT PASS large items as function arguments
 # # instead export them
-# xport <- c("all_constraint_vals", "good_con", "ccoef", "getwts", "calibrate_reweight") 
+# xport <- c("globals", "idfile", "recipe", "puf.vnames", "mrgdf",
+#            "n.neg", "n.pos", "n.sum", "val.neg", "val.pos", "val.sum",
+#            "naz", "eval_f_wtfs", "eval_grad_f_wtfs") 
 # popts <- list(.packages=packages, .export=xport)
 # popts
-# 
-# rungroup <- function(ugroup.in) {
-#   df <- ccoef %>%
-#     filter(ftype=="syn_nd") %>%
-#     filter(ugroup==ugroup.in)
-#     
-#   df2 <- getwts(df, all_constraint_vals, good_con)
-#   return(df2)
-# }
-# 
-# a <- proc.time()
-# # warn <- options()$warn
-# # options(warn=-1)
-# d <- ldply(1:164, .progress="text", .parallel=TRUE, .paropts=popts, .fun=rungroup)
-# # d1 <- llply(4:4, .progress="text", .parallel=FALSE, .paropts=popts, .fun=rungroup)
-# # options(warn=warn)
-# b <- proc.time()
-# b - a # 210 secs - not really much savings
-
-# glimpse(d)
-# count(d, ugroup)
-
-# library("multidplyr")
-# cluster <- new_cluster(4)
-# a <- proc.time()
-# opt2 <- ccoef %>%
-#   filter(ftype=="syn_nd") %>%
-#   # filter(ugroup %in% 1:10) %>%
-#   group_by(ftype, ugroup) %>%
-#   partition(cluster) %>%
-#   do(getwts(., all_constraint_vals, good_con)) %>%
-#   collect() %>%
-#   ungroup
-# b <- proc.time()
-# b - a
-
-
-# library("multidplyr")
-# cluster <- new_cluster(4)
-# 
-# ccoef2 <- ccoef %>% 
-#   filter(ftype != "puf") %>%
-#   group_by(ftype, ugroup) %>%
-#   partition(cluster)
-# 
-# good_con2 <- ccoef2 %>%
-#   select(ftype, ugroup, all_constraint_vars) %>%
-#   do(getgoodcols(.)) %>%
-#   collect()
-(n <- max(opt$ugroup))
-getpiece <- function(ugroup){
-  fname <- paste0("calib", ugroup.in, ".rds")
-  readRDS(paste0("d:/temp/", fname))
-}
-optlist <- llply(1:1, getpiece, .progress="text")
-str(optlist[[1]])
-attributes(optlist[[1]]$postStrata[[1]]$w)$failed
-attributes(optlist[[1]]$postStrata$eta)
-
-failed <- laply(1:n, function(i) attributes(optlist[[i]]$postStrata[[1]]$w)$failed)
-
-objcomp <- tibble(i=1:length(max.obj), synpuf17=max.obj, synthpop8=my.obj)
+# djb ----
